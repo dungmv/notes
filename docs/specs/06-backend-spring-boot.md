@@ -46,11 +46,12 @@ backend/
     │   └── db/migration/
     │       └── V1__init_schema.sql     # Flyway migration
     └── java/com/notes/backend/
-        ├── config/                     # SecurityConfig, S3Config, CentrifugoConfig
-        ├── auth/                       # AuthController, AuthService, JwtProvider
-        ├── sync/                       # SyncController, SyncService, SyncRepository
-        ├── blob/                       # BlobController, BlobService (S3 Presigner)
-        └── realtime/                   # CentrifugoPublisher, CentrifugoTokenService
+        ├── common/                     # SecurityConfig, S3Config, CentrifugoConfig, GlobalExceptionHandler
+        └── features/                   # Tổ chức theo feature (giống NestJS)
+            ├── auth/                   # AuthController, AuthService, UserRepository, dto/, model/
+            ├── sync/                   # SyncController, SyncService, SyncRepository, dto/, model/
+            ├── blob/                   # BlobController, BlobService, BlobRepository, dto/
+            └── realtime/               # CentrifugoPublisher, CentrifugoTokenService
 ```
 
 ---

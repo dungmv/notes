@@ -13,6 +13,7 @@ Tài liệu theo dõi và kiểm soát toàn bộ nợ kỹ thuật (technical d
 | TD-003 | Locked Notes ([02](./specs/02-data-model-and-storage.md), [07](./specs/07-e2ee-cryptography.md)) | Đồng bộ Locked Notes hoãn vì bản ghi và blob cũ có thể vẫn mở được bằng khóa của ghi chú thường. | High | Kiểm thử thay khóa, chuyển dữ liệu cục bộ cũ, xử lý log/snapshot trước khi khóa và đồng bộ với thiết bị offline. | Open | 2026-11-27 |
 | TD-004 | Sync transport ([04](./specs/04-sync-and-security.md), [06](./specs/06-backend-spring-boot.md)) | Client polling qua HTTPS giúp giảm hạ tầng. Độ trễ nhận bản sửa phụ thuộc chu kỳ poll và có request ngay cả khi ít thay đổi. | Low | Đo số lượt pull rỗng và độ trễ nhận thay đổi khi cả hai máy đang mở hoặc vừa quay lại app. Điều chỉnh chu kỳ theo kết quả. | Open | 2026-11-27 |
 | TD-005 | Khôi phục E2EE ([07](./specs/07-e2ee-cryptography.md)) | Đã mô tả lớp wrap phục hồi nhưng chưa có hợp đồng lấy bundle và đổi thông tin đăng nhập khi mất mật khẩu. | High | Đặc tả và kiểm thử luồng xác thực phục hồi, cập nhật nguyên tử thông tin đăng nhập và thu hồi phiên trước khi nghiệm thu Phase 3. | Open | 2026-11-27 |
+| TD-006 | macOS / `scripts/build-macos-core.sh` | XCFramework phát triển chỉ có kiến trúc máy build. Swift bindings và thư viện Rust cần được tạo lại bằng script khi mã Rust thay đổi. Cách này giữ bước sinh mã tách khỏi Xcode trong giai đoạn khởi tạo. | Low | Tích hợp bước build Rust vào quy trình build app. Tạo và kiểm tra XCFramework cho cả Apple Silicon và Intel khi chuẩn bị phân phối. | Open | 2026-11-27 |
 
 ---
 

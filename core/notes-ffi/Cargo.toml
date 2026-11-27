@@ -1,0 +1,19 @@
+[package]
+name = "notes-ffi"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[features]
+bindgen = ["uniffi/cargo-metadata", "uniffi/cli"]
+
+[dependencies]
+notes-app = { path = "../notes-app" }
+uniffi = { version = "0.33.0", default-features = false, features = ["macro-scaffolding"] }
+
+[[bin]]
+name = "uniffi-bindgen-swift"
+path = "src/bin/uniffi-bindgen-swift.rs"
+required-features = ["bindgen"]

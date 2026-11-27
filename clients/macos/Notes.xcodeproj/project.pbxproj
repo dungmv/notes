@@ -1,0 +1,170 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		7F6A95010000000000000001 /* NotesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F6A95010000000000000003 /* NotesApp.swift */; };
+		7F6A95010000000000000002 /* NotesCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7F6A95010000000000000014 /* NotesCore */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		7F6A95010000000000000003 /* NotesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesApp.swift; sourceTree = "<group>"; };
+		7F6A95010000000000000004 /* Notes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = Notes.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7F6A95010000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (7F6A95010000000000000002 /* NotesCore in Frameworks */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		7F6A95010000000000000006 = {
+			isa = PBXGroup;
+			children = (
+				7F6A95010000000000000007 /* Notes */,
+				7F6A95010000000000000008 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		7F6A95010000000000000007 /* Notes */ = {
+			isa = PBXGroup;
+			children = (7F6A95010000000000000003 /* NotesApp.swift */);
+			path = Notes;
+			sourceTree = "<group>";
+		};
+		7F6A95010000000000000008 /* Products */ = {
+			isa = PBXGroup;
+			children = (7F6A95010000000000000004 /* Notes.app */);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		7F6A95010000000000000009 /* Notes */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7F6A9501000000000000000E /* Target build configurations */;
+			buildPhases = (
+				7F6A9501000000000000000B /* Sources */,
+				7F6A95010000000000000005 /* Frameworks */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = Notes;
+			packageProductDependencies = (7F6A95010000000000000014 /* NotesCore */);
+			productName = Notes;
+			productReference = 7F6A95010000000000000004 /* Notes.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		7F6A9501000000000000000A /* Project object */ = {
+			isa = PBXProject;
+			buildConfigurationList = 7F6A9501000000000000000F /* Project build configurations */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = 7F6A95010000000000000006;
+			packageReferences = (7F6A95010000000000000013 /* Packages/NotesCore */);
+			productRefGroup = 7F6A95010000000000000008 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (7F6A95010000000000000009 /* Notes */);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		7F6A9501000000000000000B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (7F6A95010000000000000001 /* NotesApp.swift in Sources */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		7F6A9501000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.notes.macos;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		7F6A9501000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.notes.macos;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+		7F6A95010000000000000010 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7F6A95010000000000000011 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		7F6A9501000000000000000E /* Target build configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (7F6A9501000000000000000C /* Debug */, 7F6A9501000000000000000D /* Release */);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7F6A9501000000000000000F /* Project build configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (7F6A95010000000000000010 /* Debug */, 7F6A95010000000000000011 /* Release */);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		7F6A95010000000000000013 /* Packages/NotesCore */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/NotesCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7F6A95010000000000000014 /* NotesCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7F6A95010000000000000013 /* Packages/NotesCore */;
+			productName = NotesCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 7F6A9501000000000000000A /* Project object */;
+}

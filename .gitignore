@@ -45,3 +45,15 @@ $RECYCLE.BIN/
 
 # NFS temporary files
 .nfs*
+
+# Rust and Maven build output
+/target/
+/backend/target/
+
+# Xcode and generated Swift bindings
+xcuserdata/
+*.xcuserstate
+.swiftpm/
+.build/
+/clients/macos/Packages/NotesCore/NotesCoreFFI.xcframework/
+/clients/macos/Packages/NotesCore/Sources/NotesCore/notes_ffi.swift

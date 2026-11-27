@@ -61,7 +61,7 @@ notes/
 - **`notes-storage`**: Quản lý SQLite (WAL mode, connection pool), schema migrations, và lưu file đính kèm theo SHA-256 hash (`blobs/<hash[0..2]>/<hash>`).
 - **`notes-search`**: Xây dựng chỉ mục FTS5, chuẩn hóa chuỗi tiếng Việt (tìm `"ghi chu"` khớp cả `"ghi chú"`), lọc theo `#tag`, checklist, attachment.
 - **`notes-crypto`**: Xử lý mã hóa Locked Notes và E2EE Sync. Không bao giờ lưu plaintext key trên disk.
-- **`notes-sync`**: Giao tiếp qua trait `SyncTransport` (HTTP/REST + Centrifugo real-time client), quản lý sync cursor, retry backoff, và upload/download blob.
+- **`notes-sync`**: Giao tiếp qua trait `SyncTransport` (HTTPS REST do client khởi tạo), quản lý sync cursor, retry backoff, và upload/download blob.
 - **`notes-app`**: Điểm vào duy nhất cho mọi client (`NotesEngine`). Sở hữu một `tokio::runtime::Runtime` nội bộ để chạy I/O bất đồng bộ mà không bắt UI phải tự quản lý async runtime của Rust.
 
 ---
@@ -86,12 +86,12 @@ Tránh gọi FFI quá dày đặc cho từng ký tự gõ phím nếu có chi ph
    - `list_folders() -> Vec<FolderDto>`
    - `list_notes(filter: NoteFilter, sort: SortOrder) -> Vec<NoteSummaryDto>`
    - `open_note(note_id: String) -> Result<NoteDetailDto>`
-   - `apply_editor_ops(note_id: String, ops: Vec<EditorOp>) -> Result<EditorUpdateDto>`
+   - `apply_editor_ops(note_id: String, ops: Vec<EditorOp>) -> Result<EditorUpdateDto>` chạy bất đồng bộ qua FFI. Kết quả thành công chỉ trả về sau commit cục bộ; xem [hợp đồng lưu](./02-data-model-and-storage.md#31-lưu-bền-vững-và-khôi-phục).
    - `unlock_note(note_id: String, secret: UnlockSecret) -> Result<NoteDetailDto>`
-   - `trigger_sync() -> Result<()>`
+   - `trigger_sync() -> Result<()>` nhận yêu cầu **Đồng bộ ngay** và chuyển cho sync engine. Kết quả trả về xác nhận yêu cầu đã được tiếp nhận. Tiến độ và kết quả push/pull đến qua `SyncStateChanged` theo [lịch đồng bộ](./04-sync-and-security.md#13-lịch-đồng-bộ-trên-client).
 2. **Observer / Event Callback (Core → UI)**:
    - UI đăng ký một `CoreEventListener` (UniFFI callback interface).
-   - Khi sync nền hoàn tất, hoặc một ghi chú thay đổi từ thiết bị khác, hoặc tiến trình index tìm kiếm cập nhật, Rust Core phát sự kiện:
+   - Khi trạng thái đồng bộ thay đổi, hoặc một ghi chú thay đổi từ thiết bị khác, hoặc tiến trình index tìm kiếm cập nhật, Rust Core phát sự kiện:
      - `FoldersChanged`
      - `NoteListInvalidated { folder_id }`
      - `NoteContentUpdated { note_id, delta_blocks }`
@@ -104,6 +104,4 @@ Tránh gọi FFI quá dày đặc cho từng ký tự gõ phím nếu có chi ph
 
 - **UI Thread không bao giờ bị block**: Mọi thao tác đọc/ghi DB nặng, giải mã, OCR/thumbnail, hoặc network sync đều chạy trên Tokio worker threads bên trong `notes-app`.
 - **Dispatch về Main Thread**: Callback từ Rust sang Swift/C#/Kotlin luôn được gọi trên background thread của Rust. Lớp wrapper mỏng ở phía client (Swift `Actor`/`@MainActor`, C# `DispatcherQueue.TryEnqueue`) có trách nhiệm chuyển sự kiện về UI thread trước khi cập nhật Observable state.
-- **Debouncing & Batching**:
-  - Khi người dùng gõ phím liên tục, UI cập nhật tức thì trên buffer cục bộ (hoặc optimistic state) và gửi `EditorOp` sang Rust Core.
-  - Rust Core áp dụng vào CRDT in-memory ngay lập tức, nhưng **debounce việc flush snapshot xuống SQLite** (ví dụ: mỗi 300ms–500ms hoặc khi blur/chuyển note) để tránh I/O bottleneck.
+- **Phản hồi editor và lưu dữ liệu**. UI cập nhật buffer ngay để giữ độ mượt và theo dõi phần đang chờ lưu. Core xử lý batch theo thứ tự, commit trước khi xác nhận cho UI. Có thể gom thao tác chưa gửi trong một khoảng ngắn. Khi chuyển hoặc đóng note bình thường, UI yêu cầu flush. Nếu lưu lỗi, giữ thao tác chưa lưu trong phiên để thử lại và hiện trạng thái lỗi. Bản cập nhật đến từ sync không được đặt lại toàn bộ buffer đang soạn hoặc ghi đè composition của IME.

@@ -11,7 +11,7 @@
     - `Cmd+F` / `Cmd+Opt+F`: Tìm trong ghi chú / Tìm toàn bộ ghi chú.
     - `Cmd+Shift+L`: Tạo hoặc toggle Checklist.
     - `Cmd+Shift+T` / `H` / `B`: Title / Heading / Body.
-    - `Cmd+K`: Chèn link hoặc `[[` liên kết ghi chú.
+    - `Cmd+K`: Chèn liên kết. Gõ `>>` trong editor để gợi ý ghi chú đích.
   - **Dịch vụ hệ thống**: Touch ID (`LocalAuthentication` + Keychain), Spotlight indexing (tùy chọn), Share Extension, Quick Note window.
   - **Phân phối**: DMG / Mac App Store (lưu ý App Sandbox entitlements cho thư mục dữ liệu và Network client).
 
@@ -34,13 +34,13 @@
 
 ## 3. Kế hoạch Mở rộng Tương lai
 
-### 3.1. Linux Client (Phase 3)
+### 3.1. Linux Client (Phase 4+)
 - **Đề xuất công nghệ**: **GTK4 + libadwaita** viết bằng **Rust (`gtk4-rs`)**.
   - **Lợi thế lớn**: Vì UI cũng viết bằng Rust, client Linux có thể **import trực tiếp crate `notes-app`**, không cần lớp FFI hay serialize dữ liệu trung gian.
   - Tích hợp `libsecret` (GNOME Keyring / KWallet) để lưu khóa bảo mật.
   - Đóng gói dưới dạng **Flatpak** (Flathub) và AppImage.
 
-### 3.2. Mobile Clients: iOS & Android (Phase 4)
+### 3.2. Mobile Clients: iOS & Android (Phase 4+)
 - **iOS / iPadOS (SwiftUI)**:
   - Tái sử dụng 100% Swift package `NotesCore` từ macOS.
   - Chuyển từ 3-pane sang `NavigationStack` (iPhone) và `NavigationSplitView` (iPad).
@@ -58,20 +58,17 @@
 | **Rust Core** | Unit & Property-based Tests (`proptest`) | Đảm bảo CRDT merge ngẫu nhiên luôn hội tụ (convergence), crypto encrypt/decrypt chuẩn xác, FTS5 tìm tiếng Việt đúng. |
 | **Storage & Sync** | Integration Tests | Test SQLite migrations, rollback khi crash, sync 2 client giả lập (concurrent edits + offline conflicts). |
 | **FFI Boundary** | Contract / Binding Tests | Chạy Swift test & C# xUnit test gọi trực tiếp vào `notes-ffi` để kiểm tra memory leak, UTF-16 offset, và async callbacks. |
-| **UI Clients** | UI Automation Tests | XCUITest (macOS) và WinAppDriver / Appium (Windows) cho các luồng chính: tạo note, checklist, khóa note, tìm kiếm. |
+| **UI Clients** | UI Automation Tests | XCUITest (macOS) và WinAppDriver / Appium (Windows) cho các luồng chính: tạo note, checklist, khóa note và tìm kiếm theo [các mốc nghiệm thu](./03-features-and-editor.md#0-hành-vi-tham-chiếu-và-nghiệm-thu). |
 
 ---
 
 ## 5. Lộ trình Triển khai (Roadmap)
 
-- **Phase 1 — Foundation & Core MVP**:
-  - Khởi tạo Rust Workspace (`notes-domain`, `notes-crdt`, `notes-storage`, `notes-search`, `notes-app`, `notes-ffi`).
-  - Hoàn thiện CRUD Folder, Note, Tag, FTS5 search, và UniFFI bindings cho Swift & C#.
-- **Phase 2 — Desktop Clients (macOS & Windows v1.0)**:
-  - Xây dựng giao diện 3 cột trên macOS (SwiftUI) và Windows (WinUI 3).
-  - Hoàn thiện Rich Text Editor (styles, checklist, table, attachment), Locked Notes (Touch ID / Windows Hello), Export Markdown/PDF.
-- **Phase 3 — Sync Engine & Linux**:
-  - Triển khai Backend Service với **Java / Spring Boot + PostgreSQL + S3/MinIO** và adapter `notes-sync` (E2EE).
-  - Ra mắt Linux client (GTK4 + libadwaita).
-- **Phase 4 — Mobile Expansion**:
-  - Phát triển iOS (SwiftUI) và Android (Jetpack Compose) dùng chung `notes-core` và hệ thống sync.
+| Mốc | Phạm vi | Điều kiện hoàn thành |
+| :--- | :--- | :--- |
+| **Phase 1 — Prototype editor và FFI** | Dựng một editor thử trên mỗi hệ điều hành, với Rust core và cùng tài liệu mẫu. | Chạy bộ ca editor, ghi lại hệ điều hành, adapter, ca đạt/chưa đạt và lý do chọn adapter. Đo độ trễ gõ và áp patch trên cùng bộ dữ liệu. |
+| **Phase 2 — Ghi chú offline trên macOS và Windows** | Hoàn thiện một luồng tạo, sửa, tổ chức và tìm lại ghi chú bằng sidebar, danh sách và editor. Có checklist, ảnh dán, liên kết ghi chú và tìm kiếm tiếng Việt. | Các luồng Phase 1–2 trong spec editor đạt trên cả hai client. Kill tiến trình sau xác nhận đã lưu và mở lại vẫn đọc được nội dung cùng ảnh đã lưu. |
+| **Phase 3 — Đồng bộ E2EE hai thiết bị** | Dùng một bản self-host đơn node gồm Spring Boot, PostgreSQL và object storage tương thích S3. Client dùng polling, đồng bộ ngay khi quay lại app hoặc có mạng trở lại, và có nút **Đồng bộ ngay**. | Hai client hội tụ khi sửa offline. Kiểm tra retry, commit đồng thời, phân trang, polling, nút thủ công và các trigger trùng nhau. Đo từ lúc A xác nhận đã lưu đến lúc B hiển thị bản sửa khi B đang mở và khi B vừa quay lại app. Kiểm tra thêm thiết bị, khôi phục tài khoản và thu hồi quyền truy cập API của thiết bị. |
+| **Phase 4+ — Tính năng và nền tảng mở rộng** | Locked Notes cục bộ, bảng đầy đủ, Smart Folders, Gallery, Quick Note, import/export và Linux/iOS/Android đi theo kết quả thử nghiệm. | Tính năng mới có ca nghiệm thu theo hành vi tham chiếu. Client mới đọc và sửa được tài liệu chung. Locked Notes phải đạt tiêu chí lưu trữ cục bộ và vòng đời khóa trước khi bật đồng bộ. |
+
+Mỗi thử nghiệm ghi câu hỏi, dữ liệu mẫu, môi trường, tiêu chí đạt, kết quả và quyết định kỹ thuật. Với Phase 3, ghi riêng kết quả hội tụ của tài liệu và kết quả giữ các thay đổi độc lập. Compaction, HA, kiểm thử tải quy mô lớn và phân phối qua store có thể được triển khai theo nhu cầu của các mốc sau.

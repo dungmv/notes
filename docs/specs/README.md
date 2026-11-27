@@ -1,4 +1,4 @@
-# Đặc tả Kỹ thuật: Cross-Platform Notes App (Apple Notes Clone)
+# Đặc tả Kỹ thuật: Ứng dụng ghi chú đa nền tảng
 
 Tài liệu này là bộ đặc tả (specifications) cho dự án xây dựng ứng dụng ghi chú đa nền tảng mang trải nghiệm tương tự **Apple Notes**, sử dụng **Rust** làm lõi nghiệp vụ dùng chung (`notes-core`) và giao diện **Native UI** cho từng hệ điều hành.
 
@@ -6,9 +6,10 @@ Tài liệu này là bộ đặc tả (specifications) cho dự án xây dựng 
 
 ## 1. Tầm nhìn & Mục tiêu
 
-- **Trải nghiệm Native thuần túy**: Không dùng Electron hay cross-platform UI nặng nề; mỗi nền tảng dùng UI toolkit chính chủ để đạt hiệu năng, độ mượt, phím tắt, tích hợp hệ thống (Touch ID, Windows Hello, kéo thả, Quick Note) tốt nhất.
+- **Trải nghiệm tham chiếu**. Apple Notes trên macOS là chuẩn hành vi cho các luồng ghi, tổ chức và tìm lại ghi chú. Client dùng UI native và quy ước của hệ điều hành. Các hành vi chung và ngoại lệ được mô tả trong [spec editor](./03-features-and-editor.md).
+- **Nghiên cứu công nghệ**. Dự án dùng prototype và ca kiểm thử để đánh giá native editor qua FFI, hội tụ và bảo toàn ý định khi sửa offline, cùng vòng đời khóa E2EE. Tiến độ được đánh giá theo kết quả kiểm chứng và chất lượng trải nghiệm. Phân phối qua store và mở rộng hạ tầng theo sau nhu cầu sử dụng hoặc câu hỏi nghiên cứu cụ thể.
 - **Single Source of Truth bằng Rust**: Toàn bộ logic nghiệp vụ, mô hình dữ liệu, Rich-Text CRDT, tìm kiếm toàn văn (FTS), mã hóa đầu cuối (E2EE), lưu trữ cục bộ (SQLite + Blob Store) và động cơ đồng bộ (Sync Engine) nằm trong `notes-core`.
-- **Offline-first & Real-time Sync**: Ghi chú hoạt động tức thì khi mất mạng, tự động gộp xung đột (conflict-free) khi đồng bộ giữa nhiều thiết bị nhờ CRDT.
+- **Offline-first và sync đa thiết bị**. Có thể ghi và tìm kiếm khi mất mạng. Thay đổi đã xác nhận lưu tồn tại sau khi khởi động lại. Thiết bị hội tụ khi kết nối lại theo [hợp đồng sync](./04-sync-and-security.md).
 - **Mở rộng dài hạn**: Khởi đầu với **macOS (SwiftUI)** và **Windows (WinUI 3)**, kiến trúc sẵn sàng mở rộng cho **Linux** và **Mobile (iOS, Android)**.
 
 ---
@@ -19,10 +20,10 @@ Tài liệu này là bộ đặc tả (specifications) cho dự án xây dựng 
 | :--- | :--- | :--- | :--- |
 | **Phase 1–2** | **macOS** | SwiftUI (+ AppKit cho Editor/Windowing nâng cao) | UniFFI (Swift bindings + XCFramework) |
 | **Phase 1–2** | **Windows** | WinUI 3 (Windows App SDK, C#) | UniFFI C# (`uniffi-bindgen-cs`) hoặc `csbindgen` (C-ABI) |
-| **Phase 3** | **Linux** | GTK4 + libadwaita (Rust hoặc C++/Vala) | Gọi trực tiếp crate `notes-core` (nếu dùng `gtk4-rs`) hoặc C-ABI |
-| **Phase 3** | **Backend Sync** | Java 21+ / Spring Boot 4.x + PostgreSQL + S3/MinIO + Centrifugo | HTTPS REST + Centrifugo (`notes-sync`) |
-| **Phase 4** | **iOS / iPadOS** | SwiftUI (+ UIKit bridges) | Dùng chung UniFFI Swift Package với macOS |
-| **Phase 4** | **Android** | Jetpack Compose (Kotlin) | UniFFI Kotlin bindings (JNI `.so`) |
+| **Phase 4+** | **Linux** | GTK4 + libadwaita (Rust hoặc C++/Vala) | Gọi trực tiếp crate `notes-core` (nếu dùng `gtk4-rs`) hoặc C-ABI |
+| **Phase 3** | **Backend Sync** | Java 21+ / Spring Boot 4.x + PostgreSQL + S3/MinIO | HTTPS REST do `notes-sync` khởi tạo qua polling hoặc nút **Đồng bộ ngay** |
+| **Phase 4+** | **iOS / iPadOS** | SwiftUI (+ UIKit bridges) | Dùng chung UniFFI Swift Package với macOS |
+| **Phase 4+** | **Android** | Jetpack Compose (Kotlin) | UniFFI Kotlin bindings (JNI `.so`) |
 
 ---
 
@@ -42,6 +43,6 @@ Tài liệu này là bộ đặc tả (specifications) cho dự án xây dựng 
 ## 4. Nguyên tắc thiết kế (Design Principles)
 
 1. **Thin UI, Fat Core**: Lớp UI chỉ giữ trạng thái hiển thị (view state), xử lý layout, animation và native input. Mọi validate, phân loại Smart Folder, parse `#tag`, tính toán sort order, lưu trữ và sync đều thuộc về `notes-core`.
-2. **Idempotent & Deterministic**: Mọi thao tác chỉnh sửa nội dung ghi chú đi qua CRDT operations để đảm bảo đồng bộ đa thiết bị không bao giờ mất dữ liệu.
-3. **Zero-Knowledge Security**: Dữ liệu nhạy cảm (Locked Notes và tùy chọn E2EE toàn bộ tài khoản) được mã hóa tại client trước khi ghi xuống sync payload; server không bao giờ nắm khóa giải mã.
-4. **Hiệu năng khởi động < 300ms**: `notes-core` mở SQLite ở chế độ WAL, lazy-load nội dung ghi chú và blob đính kèm theo nhu cầu.
+2. **Idempotent & Deterministic**: Thao tác chỉnh sửa nội dung đi qua CRDT. Kiểm thử riêng khả năng hội tụ, lưu bền vững và giữ ý định người dùng.
+3. **Zero-Knowledge Security**: Mọi nội dung đồng bộ được mã hóa ở client. Locked Notes có lớp bảo vệ độc lập theo [chính sách lưu trữ](./02-data-model-and-storage.md#34-chính-sách-lưu-trữ-locked-notes).
+4. **Hiệu năng đo trên từng client**. Đo cold start tới khi có thể gõ, độ trễ gõ và độ trễ từ thao tác tới xác nhận lưu. Báo cáo thiết bị, hệ điều hành và bộ dữ liệu để so sánh kết quả prototype.

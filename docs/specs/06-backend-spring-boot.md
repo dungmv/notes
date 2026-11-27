@@ -6,29 +6,20 @@ Tài liệu này đặc tả kiến trúc backend cho tính năng đồng bộ �
 
 ## 1. Kiến trúc Tổng thể & Tech Stack
 
+Phase 3 dùng Spring Boot, PostgreSQL và MinIO/S3 trên một node. Client chủ động gọi HTTPS REST cho mọi lượt đồng bộ.
+
 ```text
-+-------------------+         HTTPS           +---------------------------------------+
-|  macOS / Windows  | ──────────────────────► |       Spring Boot 4 (Java 21+)        |
-|  Linux / Mobile   |                         |  Stateless REST API (Virtual Threads) |
-|   (notes-sync)    | ◄────────────────────── |  Spring Web + Spring Security (JWT)   |
-+----+---------+----+   Presigned URL (S3)    +--------+---------------------+--------+
-     │         │                                       │                     │
-     │         │ Direct Blob I/O                       │ JDBC / Flyway       │ HTTP / gRPC Publish
-     │         ▼                                       ▼                     ▼
-     │  +-------------------+                 +----------------+    +-----------------+
-     │  | S3-Compatible     |                 |  PostgreSQL 16 |    |   Centrifugo    |
-     │  | (MinIO / S3 / B2) |                 | (Sync Deltas & |    | (Real-time Push |
-     │  | (Encrypted Blobs) |                 |   Metadata)    |    |  & Connections) |
-     │  +-------------------+                 +----------------+    +--------+--------+
-     │                                                                       ▲
-     └────────────────────────── Subscribe (sync:user#<id>) ─────────────────┘
+[Client notes-sync] -- HTTPS REST --> [Spring Boot 4] -- JDBC --> [PostgreSQL]
+         |                                   |
+         |                                   | S3 API
+         |                                   v
+         +----- HTTPS qua Presigned URL --> [S3 / MinIO]
 ```
 
 ### Thành phần Công nghệ
 - **Runtime & Framework**: **Java 21+** (bật **Virtual Threads** `spring.threads.virtual.enabled=true`) + **Spring Boot 4.x** (Spring Web, Spring Security, Spring Data JDBC / jOOQ). Spring Boot hoàn toàn **stateless**, không giữ kết nối dài hạn.
 - **Database**: **PostgreSQL 16+** kết hợp **Flyway** cho schema migrations.
 - **Object Storage (Chuẩn S3)**: Giao tiếp qua chuẩn S3 API (`software.amazon.awssdk:s3` + `S3Presigner`), tương thích **MinIO** (self-host), AWS S3, Backblaze B2, hoặc Wasabi. Client upload/download file đính kèm trực tiếp bằng Presigned URL để giảm tải cho Spring Boot server.
-- **Real-time Push**: **Centrifugo** (self-hosted real-time messaging server). Tách biệt hoàn toàn việc giữ hàng chục nghìn kết nối client ra khỏi Spring Boot; Spring Boot chỉ cấp Connection JWT cho client và gọi API `publish` của Centrifugo khi có thay đổi mới.
 - **Đóng gói**: Docker image (hỗ trợ cả **JVM** và **GraalVM Native Image** nếu muốn tối ưu RAM/startup) + `docker-compose.yml` chuẩn.
 
 ---
@@ -39,19 +30,18 @@ Tài liệu này đặc tả kiến trúc backend cho tính năng đồng bộ �
 backend/
 ├── pom.xml (hoặc build.gradle.kts)
 ├── Dockerfile
-├── docker-compose.yml                  # Spring Boot + PostgreSQL + MinIO + Centrifugo
+├── docker-compose.yml                  # Spring Boot + PostgreSQL + MinIO
 └── src/main/
     ├── resources/
     │   ├── application.yml
     │   └── db/migration/
     │       └── V1__init_schema.sql     # Flyway migration
     └── java/com/notes/backend/
-        ├── common/                     # SecurityConfig, S3Config, CentrifugoConfig, GlobalExceptionHandler
+        ├── common/                     # SecurityConfig, S3Config, GlobalExceptionHandler
         └── features/                   # Tổ chức theo feature (giống NestJS)
             ├── auth/                   # AuthController, AuthService, UserRepository, dto/, model/
             ├── sync/                   # SyncController, SyncService, SyncRepository, dto/, model/
-            ├── blob/                   # BlobController, BlobService, BlobRepository, dto/
-            └── realtime/               # CentrifugoPublisher, CentrifugoTokenService
+            └── blob/                   # BlobController, BlobService, BlobRepository, dto/
 ```
 
 ---
@@ -71,6 +61,7 @@ CREATE TABLE users (
     recovery_wrapped_amk BYTEA,        -- Bản wrap dự phòng bởi 256-bit Recovery Key
     key_ring_encrypted BYTEA,          -- Lịch sử AMK cũ (khi xoay khóa)
     key_version INT NOT NULL DEFAULT 1,
+    last_sync_seq BIGINT NOT NULL DEFAULT 0,
     created_at BIGINT NOT NULL
 );
 
@@ -85,7 +76,7 @@ CREATE TABLE devices (
 
 -- Bảng nhật ký đồng bộ (Append-only Sync Oplog)
 CREATE TABLE sync_deltas (
-    server_seq BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    server_seq BIGINT NOT NULL,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     device_id UUID NOT NULL,
     entity_type TEXT NOT NULL,         -- 'folder' | 'note' | 'attachment_meta'
@@ -95,18 +86,18 @@ CREATE TABLE sync_deltas (
     key_version INT NOT NULL DEFAULT 1,
     encrypted_payload BYTEA NOT NULL,  -- Envelope ciphertext (CRDT delta hoặc folder metadata)
     created_at BIGINT NOT NULL,
+    PRIMARY KEY (user_id, server_seq),
     UNIQUE (user_id, client_op_id)
 );
-
-CREATE INDEX idx_sync_deltas_user_seq ON sync_deltas(user_id, server_seq);
 CREATE INDEX idx_sync_deltas_entity ON sync_deltas(user_id, entity_id, server_seq);
 
 -- Bảng theo dõi các blob đính kèm trên S3/MinIO (deduplication & dọn rác)
 CREATE TABLE user_blobs (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    content_hash TEXT NOT NULL,        -- SHA-256 của ciphertext blob
+    content_hash TEXT NOT NULL,        -- blob_id (định danh opaque theo spec 07)
     byte_size BIGINT NOT NULL,
     storage_key TEXT NOT NULL,
+    ciphertext_sha256 TEXT NOT NULL,
     ref_count INT NOT NULL DEFAULT 1,
     created_at BIGINT NOT NULL,
     PRIMARY KEY (user_id, content_hash)
@@ -117,7 +108,7 @@ CREATE TABLE user_blobs (
 
 ## 4. API Endpoints & Giao thức Đồng bộ
 
-Tất cả endpoint (trừ `/v1/auth/**`) được bảo vệ bởi **Spring Security** với `Authorization: Bearer <jwt>` và header `X-Device-Id: <device_uuid>`.
+Các endpoint đăng ký, lấy salt và đăng nhập dùng luồng xác thực riêng. Với endpoint dùng JWT, Spring Security kiểm tra `Authorization: Bearer <jwt>`, ràng buộc `X-Device-Id: <device_uuid>` với phiên đã xác thực và kiểm tra thiết bị còn hiệu lực. Khi thu hồi thiết bị, các yêu cầu mới bằng access token cũ bị từ chối và refresh token bị thu hồi.
 
 ### 4.1. Push Deltas (`POST /v1/sync/push`)
 - **Request**:
@@ -133,42 +124,30 @@ Tất cả endpoint (trừ `/v1/auth/**`) được bảo vệ bởi **Spring Sec
     ]
   }
   ```
-- **Xử lý trên Spring Boot**:
-  1. Trong `@Transactional`, dùng `JdbcTemplate.batchUpdate` với `INSERT INTO sync_deltas (...) VALUES (...) ON CONFLICT (user_id, client_op_id) DO NOTHING` để đảm bảo **idempotent** và hiệu năng cao.
-  2. Lấy `MAX(server_seq)` vừa tạo, gọi `CentrifugoPublisher` (qua Centrifugo HTTP/gRPC `publish` API) đẩy thông báo tới channel `sync:user#<user_id>` kèm `latest_seq` và `source_device_id` để các thiết bị khác tự động kéo delta mới.
-- **Response**: `{ "ack_seq": 1042, "accepted_count": 3 }`.
+- **Xử lý trên Spring Boot**.
+  1. Xác thực batch và yêu cầu mỗi `client_op_id` chỉ xuất hiện một lần. Trong cùng một transaction, khóa dòng `users` của tài khoản bằng `SELECT … FOR UPDATE`. Mọi thao tác thêm delta phải đi qua khóa này.
+  2. Đối chiếu `client_op_id` với delta đã lưu. Với retry cùng dữ liệu, trả lại số thứ tự đã cấp. Nếu ID trùng nhưng entity, phiên bản hoặc envelope khác, từ chối cả batch bằng HTTP 409. Mỗi delta mới lấy số tiếp theo từ `last_sync_seq`; chèn delta và cập nhật bộ đếm trong cùng transaction.
+  3. Trả biên nhận sau commit.
+- **Response** `{ "receipts": [{ "client_op_id": "uuid-v7", "server_seq": 1042 }] }`. Client dùng biên nhận để đánh dấu outbox theo từng ID, kể cả khi phản hồi đầu tiên bị mất.
 
 ### 4.2. Pull Deltas (`GET /v1/sync/pull?since_seq=1000&limit=200`)
-- **Xử lý trên Spring Boot**:
-  - Truy vấn `sync_deltas` theo `user_id` và `server_seq > since_seq` với `ORDER BY server_seq ASC LIMIT :limit`.
-- **Response**:
-  ```json
-  {
-    "deltas": [ ... ],
-    "latest_seq": 1042,
-    "has_more": false
-  }
-  ```
-- Client lặp lại `pull` cho tới khi `has_more == false`, sau đó giải mã và nạp từng delta vào `notes-crdt`.
+- Truy vấn `sync_deltas` đã commit theo tài khoản, `server_seq > since_seq`, thứ tự tăng dần. Đọc tối đa `limit + 1` dòng trong cùng truy vấn để tính `has_more`, trả tối đa `limit` dòng.
+- **Response** `{ "deltas": [...], "next_cursor": 1042, "has_more": false }`. Mỗi delta trả đủ metadata để tái tạo AAD, envelope và `server_seq`. `next_cursor` là số của delta cuối trang; trang rỗng trả lại `since_seq`.
+- Client xác thực, áp dụng và lưu từng trang cùng cursor trước khi pull tiếp. Ca nghiệm thu bao gồm hai push đồng thời cùng tài khoản (push sau không thể công bố số lớn hơn trước khi push giữ khóa hoàn tất), phân trang, rollback và retry sau khi mất response.
 
-### 4.3. Compaction (`POST /v1/sync/compact`)
-- Khi một ghi chú tích lũy quá nhiều delta nhỏ (ví dụ > 200 deltas), client gửi bản snapshot CRDT đã gộp kèm `up_to_seq`.
-- Server trong một `@Transactional` chèn snapshot mới và xóa các `sync_deltas` của `entity_id` có `server_seq <= up_to_seq`.
+### 4.3. Compaction
+
+Phase 3 giữ log append-only. Trước khi hỗ trợ compaction, đặc tả cách chứng minh snapshot bao phủ các delta bị thay thế, phục hồi thiết bị mới hoặc offline lâu, giữ biên nhận phục vụ retry và xử lý viết đồng thời khi tạo snapshot.
 
 ### 4.4. Blob Upload / Download (`S3Presigner`)
 - **`POST /v1/blobs/presign-upload`**:
-  - Client gửi `{ content_hash, byte_size }`.
-  - Server kiểm tra `user_blobs`: nếu đã tồn tại, trả về `exists: true` (deduplication, không cần upload lại).
-  - Nếu chưa có, `S3Presigner` tạo Presigned PUT URL trỏ tới `<user_id>/<content_hash>` (hết hạn sau 5 phút).
+  - Client gửi `{ content_hash, byte_size, ciphertext_sha256 }`. `content_hash` là ID blob; hai trường còn lại mô tả ciphertext.
+  - Trả `exists: true` cho blob đã xác nhận có cùng kích thước và checksum. Nếu chưa xác nhận, cấp Presigned PUT URL trỏ đến object upload tạm, ký kèm checksum ciphertext. Token upload ràng buộc tài khoản, ID blob, kích thước và checksum.
+- **`POST /v1/blobs/complete-upload`**. Client gửi token upload. Server xác minh object, kích thước và checksum, đưa object vào vị trí đã xác nhận và ghi `user_blobs` trước khi trả thành công. Retry cùng blob phải an toàn; cùng ID với ciphertext khác bị từ chối. URL upload tạm không ghi được vào object đã xác nhận. Client chỉ push delta tham chiếu blob sau bước này.
 - **`GET /v1/blobs/presign-download?hash=<content_hash>`**:
   - Kiểm tra quyền sở hữu trong `user_blobs`, trả về Presigned GET URL.
 
-### 4.5. Real-time Notification (Centrifugo)
-- Spring Boot cung cấp endpoint `GET /v1/auth/realtime-token` trả về **Centrifugo Connection JWT** (chứa `sub = user_id`, `exp`) để client kết nối trực tiếp tới Centrifugo.
-- Client (`notes-sync`) subscribe vào private/user-limited channel `sync:user#<user_id>`.
-- Centrifugo chỉ truyền tín hiệu báo hiệu nhẹ (`{ "type": "sync_available", "latest_seq": 1043, "source_device_id": "..." }`), không truyền payload ghi chú; khi nhận tín hiệu (và `source_device_id != current_device_id`), `notes-sync` ở client tự động gọi `/v1/sync/pull`.
-
-### 4.6. Auth & E2EE Key Management Endpoints
+### 4.5. Auth & E2EE Key Management Endpoints
 - `POST /v1/auth/salt`: Trả về `kdf_salt` và `kdf_params` cho email (có chống user enumeration bằng salt giả lập xác định khi email không tồn tại).
 - `POST /v1/auth/register` & `POST /v1/auth/login`: Xác thực bằng `Auth Key (AK)` (server hash thêm 1 vòng Argon2id trước khi lưu/so sánh), cấp JWT + Refresh Token và trả về `key_bundle`.
 - `GET /v1/keys/bundle`: Lấy `wrapped_amk`, `recovery_wrapped_amk`, `key_ring_encrypted`, `key_version`.
@@ -179,8 +158,8 @@ Tất cả endpoint (trừ `/v1/auth/**`) được bảo vệ bởi **Spring Sec
 
 ## 5. Vận hành, Bảo mật & Mở rộng
 
-- **Không phụ thuộc nhà cung cấp**: Chuyển đổi giữa self-host (Docker Compose với PostgreSQL + MinIO + Centrifugo) và Cloud (RDS + S3) chỉ bằng cách thay đổi biến môi trường (`SPRING_DATASOURCE_URL`, `S3_ENDPOINT`, `CENTRIFUGO_API_URL`).
-- **Hiệu năng & Concurrency**: Spring Boot giữ vai trò REST API stateless thuần túy (Java 21 Virtual Threads tối ưu cho JDBC/S3 I/O), còn toàn bộ persistent connections và fan-out real-time do **Centrifugo** đảm nhận hiệu quả với chi phí tài nguyên rất thấp.
+- **Cấu hình triển khai**. Self-host dùng Docker Compose với Spring Boot, PostgreSQL và MinIO. Cấu hình kết nối qua `SPRING_DATASOURCE_URL` và `S3_ENDPOINT` để dùng PostgreSQL và kho S3 tương thích khác.
+- **Hiệu năng và concurrency**. Đo thời gian giữ khóa theo tài khoản, độ trễ pull và chi phí polling trên bản self-host.
 - **Bảo mật**:
   - Enforce TLS 1.3 ở reverse proxy (Nginx / Caddy / Traefik).
   - Rate limiting theo `user_id` / IP (Bucket4j).

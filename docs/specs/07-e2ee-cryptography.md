@@ -12,7 +12,7 @@ Tài liệu này đặc tả chi tiết kiến trúc mật mã, mô hình đe d�
 Hệ thống E2EE được thiết kế theo mô hình **Zero-Knowledge** nhằm bảo vệ dữ liệu người dùng trước các kịch bản tấn công sau:
 
 1. **Server bị xâm nhập hoàn toàn (Compromised Backend / Storage)**:
-   - Kẻ tấn công đọc được toàn bộ PostgreSQL, S3/MinIO, log hệ thống và lưu lượng Centrifugo (**Honest-but-Curious**).
+   - Kẻ tấn công đọc được toàn bộ PostgreSQL, S3/MinIO, log hệ thống và lưu lượng API sync (**Honest-but-Curious**).
    - Kẻ tấn công chủ động sửa đổi, tráo đổi ciphertext giữa các ghi chú/người dùng, hoặc phát lại gói tin cũ (**Active Malicious Server**).
 2. **Nghe lén & Chặn giữa đường (Network MITM)**:
    - Mọi kết nối đều bắt buộc TLS 1.3; lớp E2EE cung cấp thêm tầng bảo vệ độc lập ngay cả khi TLS bị hạ cấp hoặc bị chấm dứt tại proxy không tin cậy.
@@ -27,12 +27,11 @@ Hệ thống E2EE được thiết kế theo mô hình **Zero-Knowledge** nhằm
 
 ### 1.3. Giảm thiểu Metadata (What Server Sees vs. Never Sees)
 
-| Thành phần | Server / S3 / Centrifugo **THẤY** | Server / S3 / Centrifugo **KHÔNG BAO GIỜ THẤY** |
+| Thành phần | Server / S3 **THẤY** | Server / S3 **KHÔNG BAO GIỜ THẤY** |
 | :--- | :--- | :--- |
 | **Tài khoản** | `user_id`, `email_hash`, `auth_verifier`, `kdf_salt`, `wrapped_amk` | Mật khẩu gốc, `Master Secret`, `KEK`, `AMK`, `Recovery Key` |
 | **Ghi chú & Thư mục** | `entity_id` (UUIDv7), `entity_type`, `server_seq`, `created_at`, kích thước ciphertext (đã padding) | `title`, `snippet`, `crdt_state`, `folder.name`, `parent_id`, `tags`, `smart_query`, quan hệ Note ↔ Folder |
 | **File đính kèm** | `blob_id` (keyed hash), `byte_size` (ciphertext), `storage_key` | Nội dung file, `file_name`, `mime_type`, `thumbnail`, `ocr_text`, hay 2 user có dùng chung file không |
-| **Real-time Push** | Tín hiệu `{ type: "sync_available", latest_seq, source_device_id }` | Nội dung thay đổi, tên ghi chú, hay loại thao tác |
 
 ---
 
@@ -112,7 +111,7 @@ Note Lock Key (NLK, 32B) ──► Wrap/Unwrap Locked Note DEK (tách biệt ho�
 - **`Recovery Key` (Khóa Khôi phục 256-bit)**:
   - Sinh ngẫu nhiên khi khởi tạo E2EE, hiển thị cho người dùng một lần duy nhất dưới dạng **24 từ BIP-39** hoặc chuỗi Base32 kèm checksum (ví dụ: `XXXX-XXXX-XXXX-XXXX-...`), khuyến khích lưu vào Password Manager hoặc in giấy.
   - Client tính `Recovery KEK = HKDF-Expand(RecoveryKey, "notes-e2ee-v1:recovery-kek")` và lưu thêm `recovery_wrapped_amk` lên server.
-  - Nếu quên mật khẩu, nhập `Recovery Key` để unwrap `AMK` và thiết lập mật khẩu mới. Nếu mất cả hai, dữ liệu vĩnh viễn không thể khôi phục (Zero-Knowledge).
+  - Khi quên mật khẩu, mục tiêu của luồng phục hồi là dùng `Recovery Key` để unwrap `AMK` ở client rồi thiết lập mật khẩu mới. Điều kiện nghiệm thu Phase 3 là chốt cách lấy bundle và đổi thông tin đăng nhập khi đã mất mật khẩu, như ghi tại TD-005 trong [sổ nợ kỹ thuật](../technical-debt.md).
 
 ---
 
@@ -178,7 +177,7 @@ File đính kèm (ảnh, PDF, audio) có thể lớn hàng chục đến hàng t
 - **Ghi chú thường**:
   - `plaintext_hash = SHA256(plaintext_file)`.
   - `blob_id = HMAC-SHA256(BIK, plaintext_hash)` (gửi lên server làm `content_hash` trong `user_blobs`).
-  - `BEK = HKDF-SHA256(AMK, salt = plaintext_hash, info = "notes-e2ee-v1:blob-key")`.
+  - `BEK = HKDF-SHA256(AMK, salt = plaintext_hash, info = "notes-e2ee-v1:blob-key")`. Metadata attachment bên trong delta đã mã hóa chứa `blob_id`, `plaintext_hash` và phiên bản AMK dùng để tính khóa blob. Thiết bị nhận dẫn xuất BEK từ metadata đó trước khi tải và giải mã.
   - `base_nonce` dẫn xuất xác định từ `HKDF-SHA256(BEK, info = "notes-e2ee-v1:blob-nonce")` (chỉ dùng duy nhất cho đúng `plaintext_hash` đó).
   - **Kết quả**: Trùng lặp file trong cùng 1 tài khoản vẫn được deduplicate 100% trên S3/MinIO, nhưng **2 tài khoản khác nhau upload cùng 1 file sẽ có `blob_id` và `ciphertext` hoàn toàn khác nhau** (ngăn chặn cross-user confirmation attack).
 - **Locked Notes**:
@@ -209,11 +208,13 @@ File đính kèm (ảnh, PDF, audio) có thể lớn hàng chục đến hàng t
 ## 7. Bảo mật Cục bộ (At-Rest), Biometrics & Vệ sinh Bộ nhớ
 
 ### 7.1. Mã hóa Cơ sở Dữ liệu Cục bộ
-- **SQLCipher**: Tùy chọn bật mã hóa toàn bộ file SQLite cục bộ (bao gồm cả `notes_fts` và `plain_text_cache`) bằng khóa 256-bit sinh ngẫu nhiên (`Local DB Key`) lưu trong OS Secure Storage.
+- **SQLCipher**. Tùy chọn với kho ghi chú thường. Kho hỗ trợ khóa ghi chú phải dùng SQLCipher, kể cả WAL, trước khi bật Locked Notes. Khóa cục bộ sinh ngẫu nhiên và lưu trong OS Secure Storage. Với kho SQLite cũ, cần có quy trình chuyển đổi và xử lý file DB, WAL và bản sao chưa mã hóa trước khi bật tính năng.
 - **Locked Notes (Bảo vệ kép)**:
   - Dù ứng dụng đã mở khóa bằng `AMK`, các Locked Notes vẫn giữ `crdt_state` ở dạng ciphertext (mã hóa bằng `NLK`).
-  - `plain_text_cache` và `notes_fts` **luôn để rỗng** cho Locked Notes để tránh rò rỉ nội dung qua chỉ mục tìm kiếm.
+  - Tiêu đề dùng được trong danh sách và tìm theo tiêu đề. FTS5, snippet, tag và metadata attachment dạng rõ tuân theo [chính sách lưu trữ](./02-data-model-and-storage.md#34-chính-sách-lưu-trữ-locked-notes), kể cả trong phiên mở khóa.
   - Tự động khóa lại (xóa `NLK` và plaintext khỏi RAM) khi: bấm *Lock Now*, hết thời gian chờ (mặc định 5 phút không tương tác), app xuống nền (mobile), hoặc OS khóa màn hình/sleep.
+
+Phase 3 đồng bộ E2EE cho ghi chú thường. Mốc Locked Notes cục bộ chỉ mở tính năng trong thư viện local-only. Nếu thư viện đã có ghi chú khóa, việc bật sync cần đợi đến khi có hỗ trợ Locked Notes qua sync. Trước mốc đó, cần chốt và kiểm thử cách chuyển note thường đã sync sang trạng thái khóa, gồm thay khóa nội dung, xử lý log/snapshot cũ và thiết bị còn offline.
 
 ### 7.2. Tích hợp OS Secure Storage & Biometrics
 `notes-core` **không tự gọi API sinh trắc học**. Client Native chịu trách nhiệm mở khóa kho bảo mật của hệ điều hành và truyền key material qua FFI:
@@ -289,4 +290,4 @@ Mọi thay đổi trong `notes-crypto` phải vượt qua bộ kiểm thử bắ
    - `cargo-fuzz` cho bộ parse Binary Envelope và Blob Header để đảm bảo không bao giờ panic/OOM khi nhận payload độc hại từ server.
 5. **No-Secret-Leak Checks**:
    - Test đảm bảo `format!("{:?}", key)` không chứa byte nào của khóa.
-   - Kiểm tra khóa `Locked Note` không để lại plaintext trong bảng `notes_fts` và `plain_text_cache`.
+   - Kiểm tra với note có nội dung, tag và ảnh được lưu trước khi khóa, sau khi khóa, trong phiên mở khóa, sau khi khóa lại và sau khi mở lại app. Xác minh bản chiếu cho phép, FTS, cache, metadata attachment và dọn blob mồ côi.

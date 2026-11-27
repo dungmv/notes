@@ -58,14 +58,19 @@ backend/
 
 ## 3. PostgreSQL Schema
 
-Do mô hình **Zero-Knowledge E2EE**, PostgreSQL **không lưu plaintext** của tiêu đề, nội dung ghi chú hay tên thư mục. Mọi payload đều được mã hóa từ `notes-crypto` ở phía client trước khi gửi lên API.
+Do mô hình **Zero-Knowledge E2EE** (xem chi tiết mật mã tại [07-e2ee-cryptography.md](./07-e2ee-cryptography.md)), PostgreSQL **không lưu plaintext** của tiêu đề, nội dung ghi chú hay tên thư mục. Mọi payload đều được mã hóa từ `notes-crypto` ở phía client trước khi gửi lên API.
 
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY,
     email_hash TEXT UNIQUE NOT NULL,
-    auth_verifier TEXT NOT NULL,       -- SRP / Argon2id hash để xác thực đăng nhập
-    kdf_salt BYTEA NOT NULL,
+    auth_verifier TEXT NOT NULL,       -- Server-side Argon2id hash của Auth Key (AK)
+    kdf_salt BYTEA NOT NULL,           -- 32-byte salt cho client Argon2id
+    kdf_params_json JSONB NOT NULL,    -- Tham số Argon2id (m_kib, t, p)
+    wrapped_amk BYTEA NOT NULL,        -- Account Master Key đã wrap bởi KEK
+    recovery_wrapped_amk BYTEA,        -- Bản wrap dự phòng bởi 256-bit Recovery Key
+    key_ring_encrypted BYTEA,          -- Lịch sử AMK cũ (khi xoay khóa)
+    key_version INT NOT NULL DEFAULT 1,
     created_at BIGINT NOT NULL
 );
 
@@ -86,7 +91,9 @@ CREATE TABLE sync_deltas (
     entity_type TEXT NOT NULL,         -- 'folder' | 'note' | 'attachment_meta'
     entity_id UUID NOT NULL,
     client_op_id UUID NOT NULL,        -- Idempotency key tránh trùng lặp khi retry
-    encrypted_payload BYTEA NOT NULL,  -- Ciphertext (CRDT delta hoặc folder metadata)
+    crypto_version SMALLINT NOT NULL DEFAULT 1,
+    key_version INT NOT NULL DEFAULT 1,
+    encrypted_payload BYTEA NOT NULL,  -- Envelope ciphertext (CRDT delta hoặc folder metadata)
     created_at BIGINT NOT NULL,
     UNIQUE (user_id, client_op_id)
 );
@@ -160,6 +167,13 @@ Tất cả endpoint (trừ `/v1/auth/**`) được bảo vệ bởi **Spring Sec
 - Spring Boot cung cấp endpoint `GET /v1/auth/realtime-token` trả về **Centrifugo Connection JWT** (chứa `sub = user_id`, `exp`) để client kết nối trực tiếp tới Centrifugo.
 - Client (`notes-sync`) subscribe vào private/user-limited channel `sync:user#<user_id>`.
 - Centrifugo chỉ truyền tín hiệu báo hiệu nhẹ (`{ "type": "sync_available", "latest_seq": 1043, "source_device_id": "..." }`), không truyền payload ghi chú; khi nhận tín hiệu (và `source_device_id != current_device_id`), `notes-sync` ở client tự động gọi `/v1/sync/pull`.
+
+### 4.6. Auth & E2EE Key Management Endpoints
+- `POST /v1/auth/salt`: Trả về `kdf_salt` và `kdf_params` cho email (có chống user enumeration bằng salt giả lập xác định khi email không tồn tại).
+- `POST /v1/auth/register` & `POST /v1/auth/login`: Xác thực bằng `Auth Key (AK)` (server hash thêm 1 vòng Argon2id trước khi lưu/so sánh), cấp JWT + Refresh Token và trả về `key_bundle`.
+- `GET /v1/keys/bundle`: Lấy `wrapped_amk`, `recovery_wrapped_amk`, `key_ring_encrypted`, `key_version`.
+- `PUT /v1/auth/credentials`: Cập nhật nguyên tử `auth_verifier`, `kdf_salt`, `wrapped_amk` khi đổi mật khẩu và thu hồi toàn bộ Refresh Token của thiết bị khác.
+- `PUT /v1/keys/rotate`: Xoay `AMK` (optimistic locking theo `expected_key_version`, lưu `key_ring_encrypted`). Chi tiết xem tại [07-e2ee-cryptography.md](./07-e2ee-cryptography.md).
 
 ---
 

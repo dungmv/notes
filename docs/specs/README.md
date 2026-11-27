@@ -35,6 +35,7 @@ Tài liệu này là bộ đặc tả (specifications) cho dự án xây dựng 
 4. [04-sync-and-security.md](./04-sync-and-security.md) — Giao thức đồng bộ Offline-first, Mã hóa đầu cuối (E2EE), Key Management & Biometrics.
 5. [05-platform-clients-and-roadmap.md](./05-platform-clients-and-roadmap.md) — Đặc tả chi tiết cho macOS, WinUI 3, định hướng Linux/Mobile, chiến lược kiểm thử và lộ trình phát triển.
 6. [06-backend-spring-boot.md](./06-backend-spring-boot.md) — Đặc tả Backend Service sử dụng Java / Spring Boot, PostgreSQL và S3-compatible Storage (MinIO/S3).
+7. [07-e2ee-cryptography.md](./07-e2ee-cryptography.md) — Đặc tả chi tiết Mã hóa Đầu cuối (E2EE): Threat Model, Cipher Suite, Phân cấp Khóa, Wire Format & AAD, Streaming Blobs, Zero-Knowledge Auth và Vòng đời Khóa.
 
 ---
 

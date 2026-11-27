@@ -25,14 +25,16 @@ Mục tiêu: Dữ liệu luôn sẵn sàng offline, đồng bộ tự động �
 
 ## 2. Mô hình Bảo mật & Mã hóa (Security & E2EE)
 
+> **Đặc tả mật mã chi tiết** (Threat Model, Cipher Suite, Wire Format, AAD, Streaming Blobs, Recovery Key, Key Rotation và Kiểm thử bảo mật) được định nghĩa đầy đủ tại [07-e2ee-cryptography.md](./07-e2ee-cryptography.md). Dưới đây là tóm tắt tổng quan:
+
 ### 2.1. Phân tầng Bảo vệ
 1. **At-Rest (Trên thiết bị)**:
-   - Tùy chọn mã hóa toàn bộ SQLite database bằng **SQLCipher** (hoặc mã hóa ở tầng ứng dụng).
-   - **Locked Notes**: Luôn được mã hóa bất kể cài đặt sync, sử dụng khóa riêng tách biệt khỏi dữ liệu thường.
+   - Tùy chọn mã hóa toàn bộ SQLite database (kể cả chỉ mục FTS5) bằng **SQLCipher** với khóa lưu trong OS Secure Storage.
+   - **Locked Notes**: Luôn được mã hóa bất kể cài đặt sync, sử dụng `Note Lock Key (NLK)` tách biệt khỏi `AMK` và không ghi plaintext vào FTS5.
 2. **In-Transit**: Bắt buộc TLS 1.3 cho mọi kết nối sync.
 3. **End-to-End Encryption (E2EE)**:
-   - Khi bật E2EE, toàn bộ `title`, `snippet`, `crdt_state`, `folder.name`, và `attachments` đều được mã hóa bằng **XChaCha20-Poly1305** (hoặc **AES-256-GCM**) tại client trước khi rời khỏi `notes-core`.
-   - Server chỉ thấy `entity_id`, `updated_at` (hoặc timestamp đã làm mờ), `ciphertext`, và `auth_tag`.
+   - Toàn bộ `title`, `snippet`, `crdt_state`, `folder.name`, `tags`, và `attachments` đều được mã hóa bằng **XChaCha20-Poly1305** (kèm **AAD** ràng buộc `user_id`, `entity_id`, `client_op_id`, `key_version` và **STREAM AEAD** cho file đính kèm) tại client trước khi rời khỏi `notes-core`.
+   - Server chỉ thấy `entity_id`, `server_seq`, `created_at`, `ciphertext` (đã padding), và `auth_tag`.
 
 ### 2.2. Quản lý Khóa (Key Management)
 
@@ -40,11 +42,17 @@ Mục tiêu: Dữ liệu luôn sẵn sàng offline, đồng bộ tự động �
 User Passphrase
       │
       ▼  Argon2id (salt, m=64MB, t=3, p=1)
-Key Encryption Key (KEK)
+Master Secret (MS)
       │
-      ├──► Unwrap Master Sync Key (MSK) ──► Mã hóa Note/Folder/Blob khi Sync
+      ├──► HKDF ──► Auth Key (AK) ──► Xác thực đăng nhập (Server không nhận MS/KEK)
       │
-      └──► Unwrap Note Lock Key (NLK)   ──► Mã hóa riêng từng Locked Note
+      └──► HKDF ──► Key Encryption Key (KEK)
+                         │
+                         ▼  Unwrap (hỗ trợ cả 256-bit Recovery Key)
+                    Account Master Key (AMK) ──► Wrap từng Per-Entity DEK & Blob Keys
+
+Locked Notes (độc lập):
+Lock Passphrase / Biometric Secret ──► Note Lock Key (NLK) ──► Wrap Locked Note DEK
 ```
 
 - **Tích hợp Biometrics của OS (Không lưu mật khẩu thô)**:

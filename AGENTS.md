@@ -6,7 +6,12 @@
 - Quy tắc đặt tên file: `yyyymmddhhmmss-<plan-name>.md` (sử dụng timestamp thời điểm tạo theo định dạng 14 chữ số + tên ngắn gọn viết thường, nối bằng dấu gạch ngang).
   - Ví dụ: `docs/plans/20261127030500-init-rust-workspace.md`.
 
-## 2. Technical Debt Tracking (`docs/technical-debt.md`)
+## 2. Tasks (`docs/tasks/`)
+
+- Mỗi task triển khai **bắt buộc** phải được lưu thành một file Markdown riêng trong `docs/tasks/`, kể cả khi đã có task tương ứng trên Codex.
+- Mỗi file ghi mã hoặc tên task, phạm vi, phụ thuộc và tiêu chí nghiệm thu. Nếu task thuộc một kế hoạch, liên kết file task và kế hoạch tương ứng.
+
+## 3. Technical Debt Tracking (`docs/technical-debt.md`)
 
 - **Không được bỏ qua nợ kỹ thuật (No Silent Technical Debt)**: Mọi giải pháp tạm thời (workaround), đánh đổi kiến trúc (trade-off), phần chưa tối ưu, test bị hoãn, hoặc việc cần refactor sau đều **phải được ghi nhận** vào `docs/technical-debt.md`.
 - Mỗi mục nợ kỹ thuật cần ghi rõ:

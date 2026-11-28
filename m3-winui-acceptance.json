@@ -1,0 +1,1 @@
+{"passed":["Initial WinUI sync status and button state verified","E2EE registration, Recovery Key, and Windows DPAPI unlock verified"],"error":"System.InvalidOperationException: \u0110\u1ED3ng b\u1ED9 th\u1EA5t b\u1EA1i: Ch\u1EDD g\u1EEDi (2), deltas=0\r\n   at Notes.MainPage.VerifyM3(String root)"}

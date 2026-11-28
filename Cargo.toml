@@ -1,5 +1,5 @@
 [workspace]
-members = ["core/notes-app", "core/notes-ffi"]
+members = ["core/notes-crypto", "core/notes-sync", "core/notes-app", "core/notes-ffi"]
 resolver = "3"
 
 [workspace.package]

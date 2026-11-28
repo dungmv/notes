@@ -27,6 +27,7 @@ public sealed partial class MainPage
     private CancellationTokenSource? lifetime;
     private bool dialogOpen;
     private bool loadingImage;
+    private string? dataRoot;
     private (Func<EditorUpdate> Call, bool Redo)? pending;
     private (string Id, Cell? Cell, int Start, int End, string Query)? lastMatch;
 
@@ -68,9 +69,10 @@ public sealed partial class MainPage
         root = Path.GetFullPath(root);
 #if DEBUG
         var verify = args.Contains("--verify-m1");
+        var verifyM3 = args.Contains("--verify-m3");
         var m2 = args.SingleOrDefault(arg => arg.StartsWith("--m2-", StringComparison.Ordinal));
-        if (verify && (index < 0 || File.Exists(Path.Combine(root, "notes.sqlite3"))))
-            throw new InvalidOperationException("--verify-m1 cần --data-dir trỏ tới thư mục thử nghiệm mới.");
+        if ((verify || verifyM3) && (index < 0 || File.Exists(Path.Combine(root, "notes.sqlite3"))))
+            throw new InvalidOperationException("--verify cần --data-dir trỏ tới thư mục thử nghiệm mới.");
         if (m2 is not null && (index < 0 || !File.Exists(Path.Combine(root, "notes.sqlite3"))))
             throw new InvalidOperationException("Nghiệm thu M2 cần --data-dir chứa fixture desktop.");
 #endif
@@ -81,6 +83,7 @@ public sealed partial class MainPage
             return;
         }
         offline = session;
+        dataRoot = root;
         ChecklistSort.IsChecked = offline.Call<bool>(new { type = "checklist_sort" });
         refreshTimer ??= DispatcherQueue.CreateTimer();
         refreshTimer.Interval = TimeSpan.FromMilliseconds(180);
@@ -89,9 +92,11 @@ public sealed partial class MainPage
         RefreshFolders("all");
         RefreshNotes();
         SetCurrent(null);
+        InitializeSync(root);
         GlobalSearch.Focus(FocusState.Programmatic);
 #if DEBUG
         if (verify) DispatcherQueue.TryEnqueue(() => _ = VerifyOffline(root));
+        if (verifyM3) DispatcherQueue.TryEnqueue(() => _ = VerifyM3(root));
         if (m2 is not null) DispatcherQueue.TryEnqueue(() => _ = VerifyM2(root, m2));
 #endif
     }
@@ -109,6 +114,7 @@ public sealed partial class MainPage
         }
         editor?.Dispose();
         editor = null;
+        CloseSync();
         offline?.Dispose();
         offline = null;
     }
@@ -395,6 +401,7 @@ public sealed partial class MainPage
             throw new InvalidOperationException($"Chưa lưu. {error.Message}", error);
         }
         Project(update, redo);
+        ScheduleSyncAfterCommit();
     }
 
     private void RetryClick(object sender, RoutedEventArgs args) => Run(() =>

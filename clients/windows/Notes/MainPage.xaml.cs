@@ -202,6 +202,11 @@ public sealed partial class MainPage : Page
                 DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
                     () => Run(FlushDeferred));
             }
+            if (pendingSyncReload && !IsComposing)
+            {
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                    () => Run(ReloadCurrentNotePreservingSelection));
+            }
         };
         return field;
     }

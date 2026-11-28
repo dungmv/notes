@@ -1,11 +1,14 @@
 use base64::Engine as _;
 use notes_app::editor::{Batch, EditorError};
 use notes_app::offline::{NoteEditor, OfflineError, Store, find_in_text};
+use notes_app::sync::{SyncClient, SyncError};
+use notes_sync::SyncTransportError;
 use serde::Deserialize;
 use serde_json::{Value, json, to_value};
 use std::ffi::{CStr, CString, c_char};
 use std::path::Path;
 use std::ptr;
+use uuid::Uuid;
 
 #[cfg(test)]
 mod tests;
@@ -13,6 +16,7 @@ mod tests;
 pub struct OfflineSession {
     store: Store,
     note: Option<NoteEditor>,
+    sync: SyncClient,
 }
 
 #[derive(Deserialize)]
@@ -54,6 +58,10 @@ enum Request {
         id: String,
         deleted: bool,
     },
+    SetPinned {
+        id: String,
+        pinned: bool,
+    },
     OpenNote {
         id: String,
     },
@@ -74,6 +82,43 @@ enum Request {
     ImagePath {
         id: String,
     },
+    SyncStatus,
+    SyncUnlock {
+        amk_b64: String,
+        refresh_token: String,
+    },
+    SyncClear,
+    SyncRegister {
+        server_url: String,
+        email: String,
+        passphrase: String,
+        device_name: String,
+        platform: String,
+    },
+    SyncLogin {
+        server_url: String,
+        email: String,
+        passphrase: String,
+        device_name: String,
+        platform: String,
+    },
+    SyncChangePassword {
+        current_passphrase: String,
+        new_passphrase: String,
+    },
+    SyncRecover {
+        server_url: String,
+        email: String,
+        recovery_key: String,
+        new_passphrase: String,
+        device_name: String,
+        platform: String,
+    },
+    SyncListDevices,
+    SyncRevokeDevice {
+        target_device_id: String,
+    },
+    SyncNow,
 }
 
 type Reply = Result<Value, Box<dyn std::error::Error>>;
@@ -81,6 +126,7 @@ type Reply = Result<Value, Box<dyn std::error::Error>>;
 impl OfflineSession {
     fn call(&mut self, request: Request) -> Reply {
         let store = &mut self.store;
+        let sync = &mut self.sync;
         let result = match request {
             Request::Folders => to_value(store.folders()?),
             Request::ChecklistSort => to_value(store.checklist_sort()?),
@@ -104,6 +150,10 @@ impl OfflineSession {
             }
             Request::SetDeleted { id, deleted } => {
                 store.set_deleted(&id, deleted)?;
+                Ok(Value::Null)
+            }
+            Request::SetPinned { id, pinned } => {
+                store.set_pinned(&id, pinned)?;
                 Ok(Value::Null)
             }
             Request::OpenNote { id } => {
@@ -137,6 +187,78 @@ impl OfflineSession {
                 )?)
             }
             Request::ImagePath { id } => to_value(store.image_path(active(&mut self.note)?, &id)?),
+            Request::SyncStatus => to_value(sync.status(store)?),
+            Request::SyncUnlock {
+                amk_b64,
+                refresh_token,
+            } => to_value(sync.unlock_saved_session(store, &amk_b64, &refresh_token)?),
+            Request::SyncClear => to_value(sync.clear_session(store)?),
+            Request::SyncRegister {
+                server_url,
+                email,
+                passphrase,
+                device_name,
+                platform,
+            } => to_value(sync.register(
+                store,
+                &server_url,
+                &email,
+                &passphrase,
+                &device_name,
+                &platform,
+            )?),
+            Request::SyncLogin {
+                server_url,
+                email,
+                passphrase,
+                device_name,
+                platform,
+            } => to_value(sync.login(
+                store,
+                &server_url,
+                &email,
+                &passphrase,
+                &device_name,
+                &platform,
+            )?),
+            Request::SyncChangePassword {
+                current_passphrase,
+                new_passphrase,
+            } => {
+                sync.change_password(store, &current_passphrase, &new_passphrase)?;
+                Ok(Value::Null)
+            }
+            Request::SyncRecover {
+                server_url,
+                email,
+                recovery_key,
+                new_passphrase,
+                device_name,
+                platform,
+            } => to_value(sync.recover_account(
+                store,
+                &server_url,
+                &email,
+                &recovery_key,
+                &new_passphrase,
+                &device_name,
+                &platform,
+            )?),
+            Request::SyncListDevices => to_value(sync.list_devices(store)?),
+            Request::SyncRevokeDevice { target_device_id } => {
+                let target = Uuid::parse_str(&target_device_id)?;
+                sync.revoke_device(store, target)?;
+                Ok(Value::Null)
+            }
+            Request::SyncNow => {
+                let res = sync.sync_now(store)?;
+                if let Some(open_id) = self.note.as_ref().map(|n| n.id().to_owned())
+                    && res.changed_note_ids.iter().any(|id| id == &open_id)
+                {
+                    self.note = Some(store.open_note(&open_id)?);
+                }
+                to_value(res)
+            }
         };
         Ok(result?)
     }
@@ -156,6 +278,19 @@ fn reply(result: Reply) -> *mut c_char {
                 Some(OfflineError::Editor(EditorError::HistoryConflict))
             ) {
                 json!({ "error": message, "code": "history_conflict" })
+            } else if matches!(
+                error.downcast_ref::<SyncError>(),
+                Some(
+                    SyncError::NotAuthenticated
+                        | SyncError::Transport(SyncTransportError::Unauthorized)
+                )
+            ) {
+                json!({ "error": message, "code": "sync_unauthorized" })
+            } else if matches!(
+                error.downcast_ref::<SyncError>(),
+                Some(SyncError::Transport(SyncTransportError::Network(_)))
+            ) {
+                json!({ "error": message, "code": "sync_network" })
             } else {
                 json!({ "error": message })
             }
@@ -180,7 +315,11 @@ pub unsafe extern "C" fn notes_offline_open(
         unsafe { output.write(ptr::null_mut()) };
         let path = unsafe { CStr::from_ptr(path) }.to_str()?;
         let store = Store::open(Path::new(path))?;
-        let session = Box::new(OfflineSession { store, note: None });
+        let session = Box::new(OfflineSession {
+            store,
+            note: None,
+            sync: SyncClient::new(),
+        });
         unsafe { output.write(Box::into_raw(session)) };
         Ok(Value::Null)
     })())

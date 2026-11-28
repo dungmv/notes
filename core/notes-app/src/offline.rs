@@ -13,7 +13,7 @@ use uuid::Uuid;
 pub const ALL: &str = "all";
 pub const INBOX: &str = "inbox";
 pub const TRASH: &str = "trash";
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 const NOTE_COLUMNS: &str = "n.id,n.folder_id,n.title,n.snippet,n.deleted_at IS NOT NULL";
 
 #[derive(Debug, thiserror::Error)]
@@ -59,6 +59,10 @@ pub struct NoteEditor {
 }
 
 impl NoteEditor {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
     pub fn snapshot(&self) -> &Snapshot {
         self.editor.snapshot()
     }
@@ -112,21 +116,41 @@ impl Store {
         )?)
     }
 
-    pub fn create_folder(&self, name: &str) -> Result<String, OfflineError> {
+    pub fn create_folder(&mut self, name: &str) -> Result<String, OfflineError> {
         let id = new_id();
-        self.db.execute(
+        let ts = now();
+        let valid = valid_name(name)?.to_owned();
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
             "INSERT INTO folders(id,name,kind,sort_order,created_at,updated_at)
             VALUES(?1,?2,'normal',2,?3,?3)",
-            params![id, valid_name(name)?, now()],
+            params![id, valid, ts],
         )?;
+        crate::sync::enqueue_folder_upsert(&tx, &id, &valid, "normal", 2, ts, ts)?;
+        tx.commit()?;
         Ok(id)
     }
 
-    pub fn rename_folder(&self, id: &str, name: &str) -> Result<(), OfflineError> {
-        changed(self.db.execute(
+    pub fn rename_folder(&mut self, id: &str, name: &str) -> Result<(), OfflineError> {
+        let ts = now();
+        let valid = valid_name(name)?.to_owned();
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        changed(tx.execute(
             "UPDATE folders SET name=?2,updated_at=?3 WHERE id=?1 AND kind='normal'",
-            params![id, valid_name(name)?, now()],
-        )?)
+            params![id, valid, ts],
+        )?)?;
+        let (kind, sort_order, created_at): (String, i64, i64) = tx.query_row(
+            "SELECT kind, sort_order, created_at FROM folders WHERE id=?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        crate::sync::enqueue_folder_upsert(&tx, id, &valid, &kind, sort_order, created_at, ts)?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn notes(&self, folder: &str) -> Result<Vec<Note>, OfflineError> {
@@ -197,23 +221,48 @@ impl Store {
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_folder(&tx, folder)?;
+        let ts = now();
+        let state = editor.crdt_state();
         tx.execute(
             "INSERT INTO notes(id,folder_id,crdt_state,created_at,updated_at)
             VALUES(?1,?2,?3,?4,?4)",
-            params![id, folder, editor.crdt_state(), now()],
+            params![id, folder, state, ts],
         )?;
         reindex(&tx, &id)?;
+        crate::sync::enqueue_note_create(&tx, &id, folder, &state, ts, ts)?;
         tx.commit()?;
         Ok(id)
     }
 
-    pub fn move_note(&self, id: &str, folder: &str) -> Result<(), OfflineError> {
-        require_folder(&self.db, folder)?;
-        changed(self.db.execute(
+    pub fn move_note(&mut self, id: &str, folder: &str) -> Result<(), OfflineError> {
+        let ts = now();
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_folder(&tx, folder)?;
+        changed(tx.execute(
             "UPDATE notes SET folder_id=?2,updated_at=?3
-            WHERE id=?1 AND deleted_at IS NULL",
-            params![id, folder, now()],
-        )?)
+            WHERE id=?1 AND deleted_at IS NULL AND is_locked=0",
+            params![id, folder, ts],
+        )?)?;
+        crate::sync::enqueue_note_move(&tx, id, folder, ts)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn set_pinned(&mut self, id: &str, pinned: bool) -> Result<(), OfflineError> {
+        let ts = now();
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        changed(tx.execute(
+            "UPDATE notes SET is_pinned=?2,updated_at=?3
+            WHERE id=?1 AND deleted_at IS NULL AND is_locked=0",
+            params![id, pinned, ts],
+        )?)?;
+        crate::sync::enqueue_note_pin(&tx, id, pinned, ts)?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn set_deleted(&mut self, id: &str, deleted: bool) -> Result<(), OfflineError> {
@@ -223,7 +272,7 @@ impl Store {
         let timestamp = now();
         let count = if deleted {
             tx.execute(
-                "UPDATE notes SET deleted_at=?2,updated_at=?2 WHERE id=?1 AND deleted_at IS NULL",
+                "UPDATE notes SET deleted_at=?2,updated_at=?2 WHERE id=?1 AND deleted_at IS NULL AND is_locked=0",
                 params![id, timestamp],
             )?
         } else {
@@ -232,12 +281,13 @@ impl Store {
                 folder_id=CASE WHEN EXISTS(SELECT 1 FROM folders f WHERE f.id=notes.folder_id
                   AND f.kind IN ('normal','inbox') AND f.deleted_at IS NULL)
                   THEN folder_id ELSE 'inbox' END
-                WHERE id=?1 AND deleted_at IS NOT NULL",
+                WHERE id=?1 AND deleted_at IS NOT NULL AND is_locked=0",
                 params![id, timestamp],
             )?
         };
         changed(count)?;
         reindex(&tx, id)?;
+        crate::sync::enqueue_note_delete(&tx, id, if deleted { Some(timestamp) } else { None }, timestamp)?;
         tx.commit()?;
         Ok(())
     }
@@ -402,6 +452,7 @@ impl Store {
                 }
             }
         }
+        let ts = now();
         if tx.execute(
             "UPDATE notes SET crdt_state=?1,revision=?2,title=?3,snippet=?4,
             plain_text_cache=?5,has_checklist=?6,has_attachments=?7,updated_at=?8
@@ -414,7 +465,7 @@ impl Store {
                 text,
                 checklist,
                 images,
-                now(),
+                ts,
                 note_id,
                 sql_revision(update.base_revision)?
             ],
@@ -423,6 +474,7 @@ impl Store {
             return Err(EditorError::StaleRevision.into());
         }
         reindex(&tx, note_id)?;
+        crate::sync::enqueue_note_crdt(&tx, note_id, state, ts)?;
         tx.commit()?;
         Ok(())
     }
@@ -599,10 +651,68 @@ fn migrate(db: &mut Connection) -> Result<(), OfflineError> {
     }
     if version < 3 {
         tx.execute_batch(include_str!("offline/schema-v3.sql"))?;
+    }
+    if version < 4 {
+        tx.execute_batch(include_str!("offline/schema-v4.sql"))?;
+        tx.execute("INSERT INTO sync_config(id, device_id) VALUES(1, ?1)", [new_id()])?;
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
     tx.commit()?;
     Ok(())
+}
+
+impl Store {
+    pub(crate) fn db(&self) -> &Connection {
+        &self.db
+    }
+
+    pub(crate) fn db_mut(&mut self) -> &mut Connection {
+        &mut self.db
+    }
+
+    pub(crate) fn write_blob_bytes(&self, hash: &str, bytes: &[u8]) -> Result<(), OfflineError> {
+        let path = self.blob_path(hash)?;
+        write_blob(&path, bytes)
+    }
+
+    pub(crate) fn read_blob_bytes(&self, hash: &str) -> Result<Vec<u8>, OfflineError> {
+        let path = self.blob_path(hash)?;
+        Ok(fs::read(path)?)
+    }
+}
+
+pub(crate) fn summarize_note_snapshot(snapshot: &Snapshot) -> (String, String, String, bool, bool) {
+    let text = plain_text(snapshot);
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let title: String = lines.next().unwrap_or_default().chars().take(160).collect();
+    let snippet: String = lines
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(240)
+        .collect();
+    let checklist = snapshot
+        .blocks
+        .iter()
+        .any(|block| matches!(block.kind, BlockKind::Checklist { .. }));
+    let images = snapshot
+        .blocks
+        .iter()
+        .any(|block| matches!(block.kind, BlockKind::Image { .. }));
+    (title, snippet, text, checklist, images)
+}
+
+pub(crate) fn reindex_tx(tx: &Transaction<'_>, id: &str) -> Result<(), OfflineError> {
+    reindex(tx, id)
+}
+
+pub(crate) fn now_ms() -> i64 {
+    now()
+}
+
+pub(crate) fn new_uuid_v7() -> String {
+    new_id()
 }
 
 mod search;

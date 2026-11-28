@@ -40,8 +40,15 @@ internal sealed partial class OfflineSession : SafeHandleZeroOrMinusOneIsInvalid
         {
             using var reply = JsonDocument.Parse(Marshal.PtrToStringUTF8(buffer)
                 ?? throw new InvalidOperationException("Core không trả dữ liệu."));
-            if (reply.RootElement.TryGetProperty("code", out var code) && code.GetString() == "history_conflict")
-                throw new HistoryConflictException();
+            if (reply.RootElement.TryGetProperty("code", out var code))
+            {
+                var codeStr = code.GetString();
+                if (codeStr == "history_conflict") throw new HistoryConflictException();
+                if (codeStr == "sync_unauthorized")
+                    throw new SyncUnauthorizedException(reply.RootElement.GetProperty("error").GetString() ?? "Phiên đồng bộ hết hạn.");
+                if (codeStr == "sync_network")
+                    throw new SyncNetworkException(reply.RootElement.GetProperty("error").GetString() ?? "Chờ mạng.");
+            }
             if (reply.RootElement.TryGetProperty("error", out var error))
                 throw new InvalidOperationException(error.GetString());
             return reply.RootElement.GetProperty("value").Clone();
@@ -74,6 +81,49 @@ internal sealed partial class OfflineSession : SafeHandleZeroOrMinusOneIsInvalid
 
 internal sealed class HistoryConflictException() :
     InvalidOperationException("Không thể hoàn tác hoặc làm lại vì khối đã có thay đổi mới.");
+
+internal sealed class SyncUnauthorizedException(string message) : InvalidOperationException(message);
+
+internal sealed class SyncNetworkException(string message) : InvalidOperationException(message);
+
+internal sealed record SyncStatusDto(
+    bool Enabled,
+    bool Authenticated,
+    bool Unlocked,
+    string ServerUrl,
+    string Email,
+    string UserId,
+    string DeviceId,
+    uint KeyVersion,
+    long LastServerCursor,
+    long LastSyncedAt,
+    long PendingOutboxCount,
+    string? LastError);
+
+internal sealed record AuthSuccessDto(
+    string AmkB64,
+    string RefreshToken,
+    string? RecoveryKey,
+    SyncStatusDto Status);
+
+internal sealed record SyncRunResultDto(
+    int Pushed,
+    int Pulled,
+    bool EmptyPull,
+    ulong DurationMs,
+    string[] ChangedNoteIds,
+    bool FoldersChanged,
+    bool NotesListChanged,
+    SyncStatusDto Status);
+
+internal sealed record DeviceInfoDto(
+    string Id,
+    string DeviceName,
+    string Platform,
+    long LastSeenAt,
+    long? RevokedAt,
+    long CreatedAt,
+    bool IsCurrent);
 
 internal sealed record FolderItem(string Id, string Name, string Kind)
 {

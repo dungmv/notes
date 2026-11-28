@@ -64,6 +64,8 @@
                     <Button x:Name="MoveButton" Content="Di chuyển" Click="MoveClick" />
                     <Button x:Name="DeleteButton" Content="Xóa" Click="DeleteClick" />
                     <CheckBox x:Name="ChecklistSort" Content="Tự sắp checklist" Click="ChecklistSortClick" />
+                    <Button x:Name="SyncNowButton" Content="Đồng bộ ngay" Click="SyncNowClick" />
+                    <Button x:Name="SyncAccountButton" Content="Tài khoản" Click="SyncAccountClick" />
                 </StackPanel>
                 <ScrollViewer HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto" VerticalScrollMode="Disabled">
                     <StackPanel x:Name="EditActions" Orientation="Horizontal" Spacing="6">
@@ -88,10 +90,13 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="Status" TextWrapping="Wrap" VerticalAlignment="Center"
                            AutomationProperties.LiveSetting="Polite" />
-                <Button x:Name="RetryButton" Grid.Column="1" Content="Thử lưu lại"
+                <TextBlock x:Name="SyncStatusText" Grid.Column="1" Opacity="0.75" VerticalAlignment="Center"
+                           AutomationProperties.LiveSetting="Polite" />
+                <Button x:Name="RetryButton" Grid.Column="2" Content="Thử lưu lại"
                         Click="RetryClick" Visibility="Collapsed" />
             </Grid>
             <ScrollViewer x:Name="EditorScroll" Grid.Row="2" HorizontalContentAlignment="Stretch"

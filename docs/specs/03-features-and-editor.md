@@ -10,6 +10,7 @@ Apple Notes trên macOS là chuẩn hành vi. Ghi phiên bản hệ điều hàn
 | Phase 1–2 | Checklist | Return tạo mục tiếp theo, Shift+Return xuống dòng trong cùng mục, Tab/Shift+Tab đổi cấp khi ở trong danh sách. Khi bật tự sắp xếp, đánh dấu sẽ đưa mục xuống cuối và bỏ đánh dấu đưa mục về nhóm chưa hoàn tất. |
 | Phase 2 | Đính kèm và tìm kiếm | Dán ảnh vào vị trí con trỏ, mở lại vẫn giữ ảnh đúng vị trí. Tìm không dấu trả về note tiếng Việt tương ứng. Phím tắt tìm trong note và tìm toàn bộ đưa focus vào đúng nơi. |
 | Phase 2 | Liên kết ghi chú | Gõ `>>`, chọn note đích bằng bàn phím và mở được liên kết. Nhãn dùng tiêu đề tự cập nhật khi đổi tên note đích. Nhãn tùy chỉnh giữ nguyên. |
+| Phase 1–2 | Canvas liền mạch | Một ghi chú hiển thị như một bề mặt văn bản liên tục: không có khung nhập rời cho từng đoạn; chọn, xóa và định dạng được xuyên nhiều đoạn; con trỏ đi qua bảng, ảnh và thẻ liên kết không dừng lại. Enter tạo đoạn mới trong cùng canvas, Backspace ở đầu đoạn gộp với đoạn trước. |
 | Phase 3 | Cùng một tài liệu trên hai máy | Hai thiết bị sửa offline rồi kết nối lại. Cả hai nhận cùng nội dung, định dạng, trạng thái checklist và ảnh; chỉnh sửa độc lập ở các đoạn khác nhau đều được giữ. |
 | Phase 4+ | Khóa ghi chú | Danh sách hiện tiêu đề và trạng thái khóa. Tìm theo nội dung, tag và bộ lọc attachment không tiết lộ dữ liệu đã khóa. Hủy xác thực hoặc khóa lại sẽ đưa editor về màn hình khóa và bỏ trạng thái phiên mở khóa. |
 
@@ -53,6 +54,17 @@ Tương tự Apple Notes, ứng dụng sử dụng bố cục 3 cột có thể 
 - Ảnh hỗ trợ xem cỡ lớn (Large) hoặc cỡ nhỏ (Small/Thumbnail) và mở Lightbox khi click đúp.
 - PDF hỗ trợ xem inline trang hiện tại hoặc mở bằng trình xem mặc định.
 
+### 2.3. Canvas soạn thảo liền mạch (Single-Canvas Editing)
+
+Theo chuẩn Apple Notes, một ghi chú là **một bề mặt văn bản liên tục**, không phải tập hợp các ô nhập rời. Đây là yêu cầu trình bày bắt buộc cho mọi client:
+
+- **Không viền input**: đoạn văn, checklist và tiêu đề nằm trong cùng canvas; không hiển thị khung hay đường viền cho từng block; đoạn trống chiếm đúng một dòng; khoảng cách giữa các đoạn chỉ là giãn dòng.
+- **Tiêu đề**: dòng đầu áp kiểu Title trong cùng canvas (không phải ô tiêu đề riêng). Enter tại dòng tiêu đề tạo đoạn Body kế tiếp trong cùng canvas.
+- **Con trỏ và vùng chọn tự do**: di chuyển, kéo chọn và định dạng xuyên nhiều đoạn trong cùng canvas; xóa vùng chọn nhiều đoạn gộp nội dung giữ ý định (undo trả về đúng trạng thái trước).
+- **Checklist trong canvas**: mỗi mục checklist là một dòng trong canvas với checkbox bấm được; Enter tạo mục tiếp theo, Shift+Enter xuống dòng trong cùng mục, Tab/Shift+Tab đổi cấp.
+- **Block nhúng trong dòng chảy**: bảng, ảnh và thẻ liên kết ghi chú là block object nằm trong luồng văn bản; con trỏ và vùng chọn đi qua chúng liền mạch, không cắt canvas thành các khung rời có viền riêng.
+- **Cấu trúc dữ liệu không đổi**: canvas chỉ là lớp trình bày; mô hình block và hợp đồng thao tác CRDT (`replace`, split/merge, `paragraph_style`, `toggle`) giữ nguyên.
+
 ---
 
 ## 3. Chiến lược Kiến trúc Editor Đa nền tảng
@@ -73,6 +85,14 @@ Tương tự Apple Notes, ứng dụng sử dụng bố cục 3 cột có thể 
 - **Phase 1**. Thử `NSTextView` với TextKit 2 và WinUI 3 `RichEditBox` trên cùng một tài liệu thử, cùng hợp đồng `EditorOp`/patch qua Rust. Kiểm tra IME, emoji, selection, undo/redo, checklist và một bảng cơ bản. Xác minh TextKit 2 vẫn hoạt động trong các luồng thử.
 - **Quyết định Windows**. Ưu tiên `RichEditBox` nếu đạt ca thử. Nếu có ca bắt buộc chưa đạt, ghi lại hành vi cụ thể, thử WebView2 cục bộ cho editor và đo lại các ca đó trước khi chốt adapter. Kết quả thử xác định hợp đồng dữ liệu và FFI trước khi hoàn thiện cả hai client.
 - **Chuẩn hóa Offset**: Mọi API giao tiếp giữa Editor UI và `notes-crdt` phải quy định rõ hệ quy chiếu offset (UTF-16 code units cho Swift `NSString` và C# `string`; UTF-8 byte offset cho Rust/GTK4). `notes-ffi` cung cấp helper chuyển đổi chính xác để tránh lệch con trỏ khi gõ tiếng Việt có dấu hoặc Emoji.
+
+### Kết quả chốt Windows: canvas phân khúc (M4-W.9)
+
+Editor Windows chốt theo phương án A, nhưng chuyển lớp projection từ "một control cho từng block" sang **canvas phân khúc (segmented canvas)** để đạt hành vi [§2.3](#23-canvas-soạn-thảo-liền-mạch-single-canvas-editing):
+
+- Chuỗi paragraph/checklist **liên tiếp** trong tài liệu được chiếu vào **một** `RichEditBox` duy nhất: TOM paragraph ↔ block, ánh xạ offset UTF-16 (tiếng Việt, emoji) giữa TOM và hợp đồng block qua helper `notes-ffi`. Bảng, ảnh và thẻ liên kết vẫn là control nhúng và tách run — canvas "gãy" tại block phi văn bản, con trỏ và vùng chọn phải được chuyển vùng liền mạch qua ranh giới này.
+- Style đoạn (Title, Heading, Subheading, Body, Quote, Monospaced) áp bằng `CharacterFormat`/`ParagraphFormat` trong TOM; checkbox checklist là glyph cục bộ đầu dòng, không thuộc nội dung CRDT, bấm được qua hit-test.
+- Lý do không giữ control rời cho từng block: trải nghiệm "một ghi chú nhiều ô nhập" (TD-020), mất chọn/xóa xuyên đoạn, IME chịu ranh giới control. Lý do chưa chuyển WebView2: hợp đồng thao tác và projection native đã qua các ca M0–M4; WebView2 chỉ mở lại nếu canvas phân khúc không đạt một ca bắt buộc nào đó — thử theo đúng quy trình mục trên và đo lại trước khi chốt.
 
 ---
 

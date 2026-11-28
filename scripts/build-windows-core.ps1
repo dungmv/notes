@@ -7,7 +7,14 @@ $root = Split-Path -Parent $PSScriptRoot
 # docs/technical-debt.md TD-015.
 $portablePerl = Join-Path $env:LOCALAPPDATA 'NotesBuild/perl/perl/bin'
 if (Test-Path $portablePerl) { $env:PATH = "$portablePerl;$env:PATH" }
-$architecture = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant()
+# Nhận diện kiến trúc qua biến môi trường chuẩn Windows thay vì
+# RuntimeInformation (thuộc tính này trả về null trên một số phiên PowerShell).
+$architecture = switch ($env:PROCESSOR_ARCHITECTURE) {
+    'AMD64' { 'x64' }
+    'ARM64' { 'arm64' }
+    'x86'   { 'x86' }
+    default { throw "Unsupported Windows architecture $($env:PROCESSOR_ARCHITECTURE)" }
+}
 $triple = @{
     x64 = 'x86_64-pc-windows-msvc'
     arm64 = 'aarch64-pc-windows-msvc'

@@ -87,7 +87,7 @@ public sealed partial class MainPage : Page
         var rebuild = views.TryGetValue(block.Id, out var existing) &&
             (existing.Kind != block.Kind ||
              (block.Rows is { } dims && existing.Fields.Length != dims.Sum(row => row.Length)));
-        if (rebuild)
+        if (rebuild && existing is not null)
         {
             if (existing.Fields.Contains(active)) previous = active;
             Blocks.Children.Remove(existing.Root);

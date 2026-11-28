@@ -81,7 +81,8 @@ internal sealed class PrototypeEditor : SafeHandleZeroOrMinusOneIsInvalid
 internal sealed record Mark(int Start, int End, string Style);
 internal sealed record RichText(string Text, Mark[] Marks);
 internal sealed record Cell(int Row, int Column);
-internal sealed record Block(string Id, string Kind, RichText? Content, int Depth, bool Checked, RichText[][]? Rows);
+internal sealed record Block(string Id, string Kind, RichText? Content, int Depth, bool Checked, RichText[][]? Rows,
+    string? Style, string? AttachmentId, string? NoteId, string? Label);
 internal sealed record EditorSnapshot(ulong Revision, Block[] Blocks);
 internal sealed record EditorPatch(string Type, string? Id, int Index, Block? Block);
 internal sealed record EditorUpdate(ulong BaseRevision, ulong Revision, EditorPatch[] Patches);

@@ -36,6 +36,8 @@
     <Content Include="../../../fixtures/m0/operations-v1.json;../../../fixtures/m0/expected-v1.json"
              Link="M0/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../../fixtures/m1/pixel.png" Link="M1/pixel.png"
+             CopyToOutputDirectory="PreserveNewest" Condition="'$(Configuration)' == 'Debug'" />
   </ItemGroup>
 
   <!--
@@ -74,7 +76,7 @@
   <PropertyGroup>
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
-    <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
-    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
+    <!-- The Rust JSON bridge serializes editor operations and response DTOs using reflection. -->
+    <PublishTrimmed>False</PublishTrimmed>
   </PropertyGroup>
 </Project>

@@ -4,7 +4,8 @@ use std::fmt;
 use yrs::types::Attrs;
 use yrs::updates::decoder::Decode;
 use yrs::{
-    Any, Doc, GetString, OffsetKind, Options, Out, ReadTxn, StateVector, Text, Transact, Update,
+    Any, Doc, GetString, Map, OffsetKind, Options, Out, ReadTxn, StateVector, Text, Transact,
+    Update,
 };
 
 pub const FIXTURE: &str = include_str!("../../../fixtures/m0/editor-v1.json");
@@ -29,6 +30,10 @@ pub enum BlockKind {
     Paragraph {
         content: RichText,
     },
+    Styled {
+        content: RichText,
+        style: ParagraphStyle,
+    },
     Checklist {
         content: RichText,
         depth: u8,
@@ -37,6 +42,26 @@ pub enum BlockKind {
     Table {
         rows: Vec<Vec<RichText>>,
     },
+    Image {
+        attachment_id: String,
+    },
+    NoteLink {
+        note_id: String,
+        label: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParagraphStyle {
+    Title,
+    Heading,
+    Subheading,
+    Quote,
+    Monospaced,
+    Bullet,
+    Dashed,
+    Numbered,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -58,6 +83,8 @@ pub struct Mark {
 pub enum Style {
     Bold,
     Italic,
+    Underline,
+    Strikethrough,
 }
 
 impl Style {
@@ -65,6 +92,8 @@ impl Style {
         match self {
             Self::Bold => "bold",
             Self::Italic => "italic",
+            Self::Underline => "underline",
+            Self::Strikethrough => "strikethrough",
         }
     }
 }
@@ -90,11 +119,41 @@ pub enum Operation {
         offset: u32,
         new_id: String,
     },
+    SplitParagraph {
+        id: String,
+        offset: u32,
+        new_id: String,
+    },
+    MergePrevious {
+        id: String,
+    },
     Indent {
         id: String,
         delta: i8,
     },
     Toggle {
+        id: String,
+    },
+    Format {
+        id: String,
+        cell: Option<Cell>,
+        start: u32,
+        end: u32,
+        style: Style,
+    },
+    ParagraphStyle {
+        id: String,
+        style: Option<ParagraphStyle>,
+        checklist: bool,
+    },
+    InsertAt {
+        id: String,
+        start: u32,
+        end: u32,
+        block: Block,
+        tail_id: String,
+    },
+    RemoveEmbed {
         id: String,
     },
 }
@@ -169,7 +228,7 @@ pub fn byte_to_utf16(text: &str, offset: usize) -> Result<u32, EditorError> {
 struct HistoryEntry {
     forward: Vec<Patch>,
     reverse: Vec<Patch>,
-    order: Vec<String>,
+    order: [Vec<String>; 2],
 }
 
 pub struct Editor {
@@ -183,6 +242,16 @@ impl Editor {
     pub fn open(json: &str) -> Result<Self, EditorError> {
         let snapshot: Snapshot =
             serde_json::from_str(json).map_err(|_| EditorError::InvalidDocument)?;
+        Self::validate(&snapshot)?;
+        let doc = text_doc();
+        for block in &snapshot.blocks {
+            block.write_text(&doc);
+        }
+        write_layout(&doc, &snapshot)?;
+        Ok(Self::from_parts(snapshot, doc))
+    }
+
+    fn validate(snapshot: &Snapshot) -> Result<(), EditorError> {
         let mut ids = HashSet::new();
         if snapshot.version != 1
             || snapshot
@@ -192,16 +261,32 @@ impl Editor {
         {
             return Err(EditorError::InvalidDocument);
         }
-        let doc = text_doc();
-        for block in &snapshot.blocks {
-            block.write_text(&doc);
-        }
-        Ok(Self {
+        Ok(())
+    }
+
+    fn from_parts(snapshot: Snapshot, doc: Doc) -> Self {
+        Self {
             snapshot,
             doc,
             undo: Vec::new(),
             redo: Vec::new(),
-        })
+        }
+    }
+
+    pub fn from_state(state: &[u8]) -> Result<Self, EditorError> {
+        let doc = load_doc(state)?;
+        let snapshot = {
+            let txn = doc.transact();
+            let Some(Out::Any(Any::String(layout))) = txn
+                .get_map("document")
+                .and_then(|map| map.get(&txn, "layout"))
+            else {
+                return Err(EditorError::InvalidDocument);
+            };
+            serde_json::from_str::<Snapshot>(&layout).map_err(|_| EditorError::InvalidDocument)?
+        };
+        Self::validate(&snapshot)?;
+        Ok(Self::from_parts(snapshot, doc))
     }
 
     pub fn snapshot(&self) -> &Snapshot {
@@ -209,12 +294,18 @@ impl Editor {
     }
 
     pub fn crdt_state(&self) -> Vec<u8> {
-        self.doc
-            .transact()
-            .encode_state_as_update_v1(&StateVector::default())
+        encode_state(&self.doc)
     }
 
     pub fn apply(&mut self, batch: Batch) -> Result<EditorUpdate, EditorError> {
+        self.apply_committing(batch, |_, _, _| Ok(()))
+    }
+
+    pub(crate) fn apply_committing<E: From<EditorError>>(
+        &mut self,
+        batch: Batch,
+        commit: impl FnOnce(&Snapshot, &Doc, &EditorUpdate) -> Result<(), E>,
+    ) -> Result<EditorUpdate, E> {
         self.check_revision(batch.revision)?;
         if batch.operations.is_empty() {
             return Ok(self.unchanged());
@@ -225,27 +316,36 @@ impl Editor {
         }
         let patches = diff(&self.snapshot.blocks, &staged.blocks);
         let reverse = diff(&staged.blocks, &self.snapshot.blocks);
-        // Splits only insert blocks. Undo removes them, and redo uses the
-        // original predecessor order to reinsert them after unrelated edits.
-        let order = if !batch.external && reverse.iter().any(|p| matches!(p, Patch::Delete { .. }))
-        {
-            staged.blocks.iter().map(|block| block.id.clone()).collect()
-        } else {
-            Vec::new()
-        };
-        let update = self.publish(staged, doc, patches.clone())?;
-        if !batch.external && !patches.is_empty() {
-            self.undo.push(HistoryEntry {
-                forward: patches,
+        let history = if !batch.external && !patches.is_empty() {
+            Some(HistoryEntry {
+                order: [
+                    insertion_order(&self.snapshot, &patches),
+                    insertion_order(&staged, &reverse),
+                ],
+                forward: patches.clone(),
                 reverse,
-                order,
-            });
+            })
+        } else {
+            None
+        };
+        let update = self.publish(staged, doc, patches, commit)?;
+        if let Some(history) = history {
+            self.undo.push(history);
             self.redo.clear();
         }
         Ok(update)
     }
 
     pub fn history(&mut self, revision: u64, redo: bool) -> Result<EditorUpdate, EditorError> {
+        self.history_committing(revision, redo, |_, _, _| Ok(()))
+    }
+
+    pub(crate) fn history_committing<E: From<EditorError>>(
+        &mut self,
+        revision: u64,
+        redo: bool,
+        commit: impl FnOnce(&Snapshot, &Doc, &EditorUpdate) -> Result<(), E>,
+    ) -> Result<EditorUpdate, E> {
         self.check_revision(revision)?;
         let stack = if redo { &self.redo } else { &self.undo };
         let Some(entry) = stack.last() else {
@@ -261,7 +361,7 @@ impl Editor {
             match patch {
                 Patch::Delete { id } if !staged.blocks.iter().any(|block| block.id == *id) => (),
                 Patch::Upsert { block, .. } if staged.blocks.contains(block) => (),
-                _ => return Err(EditorError::HistoryConflict),
+                _ => return Err(EditorError::HistoryConflict.into()),
             }
         }
         for patch in patches {
@@ -274,8 +374,7 @@ impl Editor {
                     {
                         *existing = block.clone();
                     } else {
-                        let index = entry
-                            .order
+                        let index = entry.order[usize::from(redo)]
                             .get(..*index)
                             .and_then(|predecessors| {
                                 predecessors.iter().rev().find_map(|id| {
@@ -289,7 +388,7 @@ impl Editor {
             }
         }
         let patches = diff(&self.snapshot.blocks, &staged.blocks);
-        let update = self.publish(staged, doc, patches)?;
+        let update = self.publish(staged, doc, patches, commit)?;
         if redo {
             self.undo.push(self.redo.pop().expect("redo entry exists"));
         } else {
@@ -314,21 +413,16 @@ impl Editor {
     }
 
     fn stage(&self) -> Result<(Snapshot, Doc), EditorError> {
-        let doc = text_doc();
-        let update =
-            Update::decode_v1(&self.crdt_state()).map_err(|_| EditorError::InvalidDocument)?;
-        doc.transact_mut()
-            .apply_update(update)
-            .map_err(|_| EditorError::InvalidDocument)?;
-        Ok((self.snapshot.clone(), doc))
+        Ok((self.snapshot.clone(), load_doc(&self.crdt_state())?))
     }
 
-    fn publish(
+    fn publish<E: From<EditorError>>(
         &mut self,
         mut staged: Snapshot,
         doc: Doc,
         patches: Vec<Patch>,
-    ) -> Result<EditorUpdate, EditorError> {
+        commit: impl FnOnce(&Snapshot, &Doc, &EditorUpdate) -> Result<(), E>,
+    ) -> Result<EditorUpdate, E> {
         let base_revision = self.snapshot.revision;
         if patches.is_empty() {
             return Ok(self.unchanged());
@@ -336,15 +430,53 @@ impl Editor {
         staged.revision = base_revision
             .checked_add(1)
             .ok_or(EditorError::InvalidOperation)?;
-        let revision = staged.revision;
+        write_layout(&doc, &staged)?;
+        let update = EditorUpdate {
+            base_revision,
+            revision: staged.revision,
+            patches,
+        };
+        commit(&staged, &doc, &update)?;
         self.snapshot = staged;
         self.doc = doc;
-        Ok(EditorUpdate {
-            base_revision,
-            revision,
-            patches,
-        })
+        Ok(update)
     }
+}
+
+pub(crate) fn encode_state(doc: &Doc) -> Vec<u8> {
+    doc.transact()
+        .encode_state_as_update_v1(&StateVector::default())
+}
+
+fn insertion_order(snapshot: &Snapshot, opposite: &[Patch]) -> Vec<String> {
+    if opposite
+        .iter()
+        .any(|patch| matches!(patch, Patch::Delete { .. }))
+    {
+        snapshot
+            .blocks
+            .iter()
+            .map(|block| block.id.clone())
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+fn load_doc(state: &[u8]) -> Result<Doc, EditorError> {
+    let doc = text_doc();
+    let update = Update::decode_v1(state).map_err(|_| EditorError::InvalidDocument)?;
+    doc.transact_mut()
+        .apply_update(update)
+        .map_err(|_| EditorError::InvalidDocument)?;
+    Ok(doc)
+}
+
+fn write_layout(doc: &Doc, snapshot: &Snapshot) -> Result<(), EditorError> {
+    let layout = serde_json::to_string(snapshot).map_err(|_| EditorError::InvalidDocument)?;
+    let map = doc.get_or_insert_map("document");
+    map.insert(&mut doc.transact_mut(), "layout", layout);
+    Ok(())
 }
 
 fn text_doc() -> Doc {
@@ -357,7 +489,9 @@ fn text_doc() -> Doc {
 impl Block {
     fn is_valid(&self) -> bool {
         match &self.kind {
-            BlockKind::Paragraph { content } => content.is_valid(),
+            BlockKind::Paragraph { content } | BlockKind::Styled { content, .. } => {
+                content.is_valid()
+            }
             BlockKind::Checklist { content, depth, .. } => *depth <= 6 && content.is_valid(),
             BlockKind::Table { rows } => rows.first().is_some_and(|first| {
                 !first.is_empty()
@@ -365,14 +499,19 @@ impl Block {
                         .iter()
                         .all(|row| row.len() == first.len() && row.iter().all(RichText::is_valid))
             }),
+            BlockKind::Image { attachment_id } => !attachment_id.is_empty(),
+            BlockKind::NoteLink { note_id, .. } => !note_id.is_empty(),
         }
     }
 
     fn write_text(&self, doc: &Doc) {
         match &self.kind {
-            BlockKind::Paragraph { content } | BlockKind::Checklist { content, .. } => {
+            BlockKind::Paragraph { content }
+            | BlockKind::Checklist { content, .. }
+            | BlockKind::Styled { content, .. } => {
                 content.write(doc, &text_key(&self.id, None));
             }
+            BlockKind::Image { .. } | BlockKind::NoteLink { .. } => (),
             BlockKind::Table { rows } => {
                 for (row, cells) in rows.iter().enumerate() {
                     for (column, content) in cells.iter().enumerate() {
@@ -385,9 +524,12 @@ impl Block {
 
     fn content_mut(&mut self, cell: Option<Cell>) -> Result<&mut RichText, EditorError> {
         match (&mut self.kind, cell) {
-            (BlockKind::Paragraph { content } | BlockKind::Checklist { content, .. }, None) => {
-                Ok(content)
-            }
+            (
+                BlockKind::Paragraph { content }
+                | BlockKind::Checklist { content, .. }
+                | BlockKind::Styled { content, .. },
+                None,
+            ) => Ok(content),
             (BlockKind::Table { rows }, Some(Cell { row, column })) => rows
                 .get_mut(row)
                 .and_then(|cells| cells.get_mut(column))
@@ -452,7 +594,12 @@ fn project(doc: &Doc, key: &str) -> RichText {
         };
         let end = position + text.encode_utf16().count() as u32;
         if let Some(attrs) = run.attributes {
-            for style in [Style::Bold, Style::Italic] {
+            for style in [
+                Style::Bold,
+                Style::Italic,
+                Style::Underline,
+                Style::Strikethrough,
+            ] {
                 if attrs.get(style.key()) != Some(&Any::Bool(true)) {
                     continue;
                 }
@@ -484,8 +631,14 @@ fn apply_op(blocks: &mut Vec<Block>, doc: &Doc, operation: Operation) -> Result<
     let id = match &operation {
         Operation::Replace { id, .. }
         | Operation::SplitChecklist { id, .. }
+        | Operation::SplitParagraph { id, .. }
+        | Operation::MergePrevious { id }
         | Operation::Indent { id, .. }
-        | Operation::Toggle { id } => id,
+        | Operation::Toggle { id }
+        | Operation::Format { id, .. }
+        | Operation::ParagraphStyle { id, .. }
+        | Operation::InsertAt { id, .. }
+        | Operation::RemoveEmbed { id } => id,
     };
     let index = blocks
         .iter()
@@ -574,14 +727,177 @@ fn apply_op(blocks: &mut Vec<Block>, doc: &Doc, operation: Operation) -> Result<
             }
             *depth = depth.saturating_add_signed(delta).min(6);
         }
+        Operation::SplitParagraph { offset, new_id, .. } => {
+            if new_id.is_empty() || blocks.iter().any(|block| block.id == new_id) {
+                return Err(EditorError::InvalidOperation);
+            }
+            let source = &mut blocks[index];
+            let style = match source.kind {
+                BlockKind::Styled {
+                    style:
+                        style @ (ParagraphStyle::Bullet
+                        | ParagraphStyle::Dashed
+                        | ParagraphStyle::Numbered
+                        | ParagraphStyle::Monospaced
+                        | ParagraphStyle::Quote),
+                    ..
+                } => Some(style),
+                _ => None,
+            };
+            let tail = split_content(source.content_mut(None)?, offset, offset)?;
+            source.write_text(doc);
+            let next = Block {
+                id: new_id,
+                kind: match style {
+                    Some(style) => BlockKind::Styled {
+                        content: tail,
+                        style,
+                    },
+                    None => BlockKind::Paragraph { content: tail },
+                },
+            };
+            next.write_text(doc);
+            blocks.insert(index + 1, next);
+        }
+        Operation::MergePrevious { .. } => {
+            let previous = index.checked_sub(1).ok_or(EditorError::InvalidTarget)?;
+            let (earlier, later) = blocks.split_at_mut(index);
+            let prefix = earlier[previous].content_mut(None)?;
+            let suffix = later[0].content_mut(None)?;
+            let offset = byte_to_utf16(&prefix.text, prefix.text.len())?;
+            prefix.text.push_str(&suffix.text);
+            prefix.marks.extend(suffix.marks.iter().map(|mark| Mark {
+                start: mark.start + offset,
+                end: mark.end + offset,
+                style: mark.style,
+            }));
+            earlier[previous].write_text(doc);
+            blocks.remove(index);
+        }
         Operation::Toggle { .. } => {
             let BlockKind::Checklist { checked, .. } = &mut blocks[index].kind else {
                 return Err(EditorError::InvalidOperation);
             };
             *checked = !*checked;
         }
+        Operation::Format {
+            id,
+            cell,
+            start,
+            end,
+            style,
+        } => {
+            let content = blocks[index].content_mut(cell)?;
+            if start >= end {
+                return Err(EditorError::InvalidRange);
+            }
+            utf16_to_byte(&content.text, start)?;
+            utf16_to_byte(&content.text, end)?;
+            let enabled = !content
+                .marks
+                .iter()
+                .any(|mark| mark.style == style && mark.start <= start && mark.end >= end);
+            let key = text_key(&id, cell);
+            let target = doc.get_or_insert_text(key.as_str());
+            target.format(
+                &mut doc.transact_mut(),
+                start,
+                end - start,
+                [(
+                    style.key().into(),
+                    if enabled { Any::Bool(true) } else { Any::Null },
+                )]
+                .into(),
+            );
+            *content = project(doc, &key);
+        }
+        Operation::ParagraphStyle {
+            style, checklist, ..
+        } => {
+            let item = &mut blocks[index];
+            if checklist && matches!(item.kind, BlockKind::Checklist { .. }) {
+                return Ok(());
+            }
+            let content = item.content_mut(None)?.clone();
+            item.kind = match (style, checklist) {
+                (_, true) => BlockKind::Checklist {
+                    content,
+                    depth: 0,
+                    checked: false,
+                },
+                (Some(style), false) => BlockKind::Styled { content, style },
+                (None, false) => BlockKind::Paragraph { content },
+            };
+        }
+        Operation::InsertAt {
+            start,
+            end,
+            block,
+            tail_id,
+            ..
+        } => {
+            if block.id.is_empty()
+                || tail_id.is_empty()
+                || block.id == tail_id
+                || blocks
+                    .iter()
+                    .any(|item| item.id == block.id || item.id == tail_id)
+                || !block.is_valid()
+                || !matches!(
+                    block.kind,
+                    BlockKind::Image { .. } | BlockKind::NoteLink { .. }
+                )
+            {
+                return Err(EditorError::InvalidOperation);
+            }
+            let source = &mut blocks[index];
+            let tail = split_content(source.content_mut(None)?, start, end)?;
+            source.write_text(doc);
+            let tail = Block {
+                id: tail_id,
+                kind: BlockKind::Paragraph { content: tail },
+            };
+            tail.write_text(doc);
+            blocks.splice(index + 1..index + 1, [block, tail]);
+        }
+        Operation::RemoveEmbed { .. } => {
+            if !matches!(
+                blocks[index].kind,
+                BlockKind::Image { .. } | BlockKind::NoteLink { .. }
+            ) {
+                return Err(EditorError::InvalidOperation);
+            }
+            blocks.remove(index);
+        }
     }
     Ok(())
+}
+
+fn split_content(content: &mut RichText, start: u32, end: u32) -> Result<RichText, EditorError> {
+    let start_byte = utf16_to_byte(&content.text, start)?;
+    let end_byte = utf16_to_byte(&content.text, end)?;
+    if start_byte > end_byte {
+        return Err(EditorError::InvalidRange);
+    }
+    let tail = RichText {
+        text: content.text[end_byte..].to_owned(),
+        marks: content
+            .marks
+            .iter()
+            .filter(|mark| mark.end > end)
+            .map(|mark| Mark {
+                start: mark.start.saturating_sub(end),
+                end: mark.end - end,
+                style: mark.style,
+            })
+            .collect(),
+    };
+    content.text.truncate(start_byte);
+    content.marks.retain_mut(|mark| {
+        mark.end = mark.end.min(start);
+        mark.start < mark.end
+    });
+    Ok(tail)
 }
 
 fn diff(before: &[Block], after: &[Block]) -> Vec<Patch> {

@@ -12,7 +12,7 @@ namespace Notes;
 
 public sealed partial class MainPage : Page
 {
-    private sealed record View(FrameworkElement Root, CheckBox? Toggle, Field[] Fields);
+    private sealed record View(FrameworkElement Root, CheckBox? Toggle, Field[] Fields, string Kind);
 
     private sealed class Field(string id, Cell? cell)
     {
@@ -23,10 +23,12 @@ public sealed partial class MainPage : Page
         internal bool Composing { get; set; }
         internal int CompositionStart { get; set; }
         internal bool Checklist { get; init; }
+        internal string? ParagraphStyle { get; set; }
         internal long Started { get; set; }
     }
 
     private readonly Dictionary<string, View> views = [];
+    private readonly List<string> blockOrder = [];
     private readonly Queue<(Field Field, int Offset)> deferred = [];
     private readonly List<double> typing = [];
     private readonly List<double> patches = [];
@@ -38,21 +40,30 @@ public sealed partial class MainPage : Page
     public MainPage()
     {
         InitializeComponent();
-        Loaded += (_, _) => Run(Reset);
+        Loaded += (_, _) => Run(InitializeEditor);
         Unloaded += (_, _) =>
         {
+            refreshTimer?.Stop();
+            refreshTimer = null;
             editor?.Dispose();
             editor = null;
+            offline?.Dispose();
+            offline = null;
         };
         PreviewKeyDown += PageKeys;
-        Status.Text = "Opening fixture…";
+        Status.Text = "Đang mở ghi chú…";
     }
 
     private void Reset()
     {
         editor?.Dispose();
         editor = PrototypeEditor.Open();
-        var snapshot = editor.Snapshot();
+        ShowSnapshot(editor.Snapshot());
+        Report();
+    }
+
+    private void ShowSnapshot(EditorSnapshot snapshot)
+    {
         revision = snapshot.Revision;
         projecting = true;
         try
@@ -62,17 +73,36 @@ public sealed partial class MainPage : Page
             typing.Clear();
             patches.Clear();
             views.Clear();
+            blockOrder.Clear();
             Blocks.Children.Clear();
-            foreach (var block in snapshot.Blocks) Upsert(Blocks.Children.Count, block);
+            foreach (var block in snapshot.Blocks)
+            {
+                blockOrder.Add(block.Id);
+                Upsert(Blocks.Children.Count, block);
+            }
+            ArrangeBlocks();
         }
         finally { projecting = false; }
-        Report();
     }
 
     private void Upsert(int index, Block block, bool redo = false)
     {
+        Field? previous = null;
+        if (views.TryGetValue(block.Id, out var existing) && existing.Kind != block.Kind)
+        {
+            if (existing.Fields.Contains(active)) previous = active;
+            Blocks.Children.Remove(existing.Root);
+            views.Remove(block.Id);
+        }
         if (!views.TryGetValue(block.Id, out var view))
         {
+            if (block.Kind is "image" or "note_link")
+            {
+                var embed = CreateEmbed(block);
+                views.Add(block.Id, new(embed, null, [], block.Kind));
+                Blocks.Children.Insert(index, embed);
+                return;
+            }
             var grid = new Grid { ColumnSpacing = 6, RowSpacing = 6 };
             CheckBox? toggle = null;
             var fields = new List<Field>();
@@ -99,7 +129,7 @@ public sealed partial class MainPage : Page
                 var field = NewField(block.Id, null, checklist);
                 if (checklist)
                 {
-                    toggle = new CheckBox { MinWidth = 0 };
+                    toggle = new CheckBox { MinWidth = 0, IsEnabled = !ReadOnlyNote };
                     Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, $"Toggle {block.Id}");
                     toggle.Click += (_, _) => Run(() => Apply(new { type = "toggle", id = block.Id }));
                     grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -110,7 +140,7 @@ public sealed partial class MainPage : Page
                 grid.Children.Add(field.Control);
                 fields.Add(field);
             }
-            view = new(grid, toggle, [.. fields]);
+            view = new(grid, toggle, [.. fields], block.Kind);
             views.Add(block.Id, view);
             Blocks.Children.Insert(index, grid);
         }
@@ -119,9 +149,19 @@ public sealed partial class MainPage : Page
         if (view.Toggle is { } box) box.IsChecked = block.Checked;
         foreach (var field in view.Fields)
         {
+            SetParagraphAppearance(field, block.Style);
             var content = field.Cell is { } cell ? block.Rows![cell.Row][cell.Column] : block.Content!;
             if (field.Content.Text != content.Text || !field.Content.Marks.SequenceEqual(content.Marks))
                 Project(field, content, redo && field == active);
+        }
+        if (previous is not null)
+        {
+            var old = previous.Control.Document.Selection;
+            active = view.Fields[0];
+            active.Control.Focus(FocusState.Programmatic);
+            active.Control.Document.Selection.SetRange(
+                Math.Min(old.StartPosition, active.Content.Text.Length),
+                Math.Min(old.EndPosition, active.Content.Text.Length));
         }
     }
 
@@ -129,7 +169,15 @@ public sealed partial class MainPage : Page
     {
         var field = new Field(id, cell) { Checklist = checklist };
         var box = field.Control;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, cell is null ? id : $"{id} {cell.Row} {cell.Column}");
+        box.IsReadOnly = ReadOnlyNote;
+        if (!prototypeMode)
+        {
+            box.Paste += (_, args) => Paste(field, args);
+            box.MinHeight = 36;
+        }
+        var automationName = prototypeMode ? (cell is null ? id : $"{id} {cell.Row} {cell.Column}")
+            : cell is null ? "Nội dung ghi chú" : $"Ô hàng {cell.Row + 1}, cột {cell.Column + 1}";
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, automationName);
         box.GotFocus += (_, _) => active = field;
         box.TextChanging += (_, _) =>
         {
@@ -172,10 +220,18 @@ public sealed partial class MainPage : Page
         field.Started = 0;
         var current = ReadText(field);
         var old = field.Content.Text;
-        if (current == old || editor is null) return;
+        if (current == old || (editor is null && offline is null) || ReadOnlyNote) return;
         var change = Difference(old, current);
+        if (!prototypeMode && field.Cell is null && !field.Checklist && current == "[] ")
+        {
+            ApplyBatch([Replace(field, 0, old.Length, ""), new { type = "paragraph_style",
+                id = field.Id, style = (string?)null, checklist = true }]);
+            return;
+        }
         Apply(Replace(field, change.Start, change.End, change.Text));
-        if (started != 0) typing.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        if (!prototypeMode && change.Text.EndsWith('>'))
+            SuggestAfterTrigger(field, change.Start + change.Text.Length);
+        if (prototypeMode && started != 0) typing.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         Report();
     }
 
@@ -209,36 +265,50 @@ public sealed partial class MainPage : Page
 
     private static void Project(Field field, RichText content, bool advanceCaret)
     {
-        var doc = field.Control.Document;
-        var before = ReadText(field);
-        var selection = doc.Selection;
-        var anchor = selection.StartPosition;
-        var end = selection.EndPosition;
-        if (before != content.Text)
+        // RichEditBox blocks programmatic document writes while it is read-only.
+        var readOnly = field.Control.IsReadOnly;
+        if (readOnly) field.Control.IsReadOnly = false;
+        try
         {
-            var change = Difference(before, content.Text);
-            doc.GetRange(change.Start, change.End).SetText(TextSetOptions.None, change.Text.Replace('\n', '\r'));
-            // A collapsed caret follows text restored by redo at its insertion point.
-            var followInsertion = advanceCaret && anchor == end && anchor == change.Start && change.Start == change.End;
-            int Translate(int offset) => followInsertion ? offset + change.Text.Length :
-                offset <= change.Start ? offset :
-                offset >= change.End ? offset + change.Text.Length - (change.End - change.Start) :
-                change.Start + change.Text.Length;
-            anchor = Translate(anchor);
-            end = Translate(end);
-        }
+            var doc = field.Control.Document;
+            var before = ReadText(field);
+            var selection = doc.Selection;
+            var anchor = selection.StartPosition;
+            var end = selection.EndPosition;
+            if (before != content.Text)
+            {
+                var change = Difference(before, content.Text);
+                doc.GetRange(change.Start, change.End).SetText(TextSetOptions.None, change.Text.Replace('\n', '\r'));
+                // A collapsed caret follows text restored by redo at its insertion point.
+                var followInsertion = advanceCaret && anchor == end && anchor == change.Start && change.Start == change.End;
+                int Translate(int offset) => followInsertion ? offset + change.Text.Length :
+                    offset <= change.Start ? offset :
+                    offset >= change.End ? offset + change.Text.Length - (change.End - change.Start) :
+                    change.Start + change.Text.Length;
+                anchor = Translate(anchor);
+                end = Translate(end);
+            }
 
-        var format = doc.GetRange(0, content.Text.Length).CharacterFormat;
-        format.Bold = FormatEffect.Off;
-        format.Italic = FormatEffect.Off;
-        foreach (var mark in content.Marks)
-        {
-            var marked = doc.GetRange(mark.Start, mark.End).CharacterFormat;
-            if (mark.Style == "bold") marked.Bold = FormatEffect.On;
-            if (mark.Style == "italic") marked.Italic = FormatEffect.On;
+            var format = doc.GetRange(0, content.Text.Length).CharacterFormat;
+            format.Bold = FormatEffect.Off;
+            format.Italic = FormatEffect.Off;
+            format.Underline = UnderlineType.None;
+            format.Strikethrough = FormatEffect.Off;
+            foreach (var mark in content.Marks)
+            {
+                var marked = doc.GetRange(mark.Start, mark.End).CharacterFormat;
+                if (mark.Style == "bold") marked.Bold = FormatEffect.On;
+                if (mark.Style == "italic") marked.Italic = FormatEffect.On;
+                if (mark.Style == "underline") marked.Underline = UnderlineType.Single;
+                if (mark.Style == "strikethrough") marked.Strikethrough = FormatEffect.On;
+            }
+            selection.SetRange(Math.Clamp(anchor, 0, content.Text.Length), Math.Clamp(end, 0, content.Text.Length));
+            field.Content = content;
         }
-        selection.SetRange(Math.Clamp(anchor, 0, content.Text.Length), Math.Clamp(end, 0, content.Text.Length));
-        field.Content = content;
+        finally
+        {
+            if (readOnly) field.Control.IsReadOnly = true;
+        }
     }
 
     private void Project(EditorUpdate update, bool redo = false)
@@ -252,17 +322,28 @@ public sealed partial class MainPage : Page
             {
                 if (patch.Type == "delete")
                 {
-                    var view = views[patch.Id!];
+                    if (!views.TryGetValue(patch.Id!, out var view)) continue;
                     if (view.Fields.Contains(active)) active = null;
                     Blocks.Children.Remove(view.Root);
                     views.Remove(patch.Id!);
+                    blockOrder.Remove(patch.Id!);
                 }
-                else Upsert(patch.Index, patch.Block!, redo);
+                else
+                {
+                    var block = patch.Block!;
+                    if (!views.ContainsKey(block.Id)) blockOrder.Insert(patch.Index, block.Id);
+                    Upsert(patch.Index, block, redo);
+                }
             }
+            ArrangeBlocks();
             revision = update.Revision;
         }
         finally { projecting = false; }
-        if (update.Patches.Length > 0) patches.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        if (update.Patches.Length > 0)
+        {
+            if (prototypeMode) patches.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            else refreshTimer?.Start();
+        }
         Report();
     }
 
@@ -271,7 +352,14 @@ public sealed partial class MainPage : Page
 
     private void Apply(object operation, bool external = false)
     {
-        if (editor is not null) Project(editor.Apply(revision, [operation], external));
+        ApplyBatch([operation], external);
+    }
+
+    private void ApplyBatch(object[] operations, bool external = false)
+    {
+        var expected = revision;
+        if (editor is not null) Project(editor.Apply(expected, operations, external));
+        else if (offline is not null) Commit(() => offline.Apply(expected, operations, external));
     }
 
     private void ApplyExternal(Field field, int offset)
@@ -336,20 +424,25 @@ public sealed partial class MainPage : Page
 
     private void History(bool redo)
     {
-        if (editor is not null && !views.Values.SelectMany(view => view.Fields).Any(field => field.Composing))
-            Project(editor.History(revision, redo), redo);
+        if (IsComposing || ReadOnlyNote) return;
+        var expected = revision;
+        if (editor is not null) Project(editor.History(expected, redo), redo);
+        else if (offline is not null && currentNote is not null)
+            Commit(() => offline.History(expected, redo), redo);
     }
 
     private void PageKeys(object sender, KeyRoutedEventArgs args)
     {
         var key = args.Key;
-        if (key is VirtualKey.F6 or VirtualKey.F7 or VirtualKey.F8)
+        if (prototypeMode && key is VirtualKey.F6 or VirtualKey.F7 or VirtualKey.F8)
         {
             args.Handled = true;
             Run(() => SendPatch(key));
             return;
         }
+        if (!prototypeMode && HandleOfflineKeys(args)) return;
         if (active is not { } field || field.Composing || field.Control.FocusState == FocusState.Unfocused) return;
+        if (ReadOnlyNote || pending is not null) return;
 
         var shift = IsDown(VirtualKey.Shift);
         if (IsDown(VirtualKey.Control) && key is VirtualKey.Z or VirtualKey.Y)
@@ -362,7 +455,7 @@ public sealed partial class MainPage : Page
             args.Handled = true;
             Run(() => Apply(new { type = "indent", id = field.Id, delta = shift ? -1 : 1 }));
         }
-        else if (field.Checklist && key == VirtualKey.Enter && !shift)
+        else if ((field.Checklist || (!prototypeMode && field.Cell is null)) && key == VirtualKey.Enter && !shift)
         {
             args.Handled = true;
             Run(() =>
@@ -371,12 +464,29 @@ public sealed partial class MainPage : Page
                 var offset = Math.Min(selection.StartPosition, field.Content.Text.Length);
                 var end = Math.Min(selection.EndPosition, field.Content.Text.Length);
                 var newId = Guid.NewGuid().ToString("N");
-                object split = new { type = "split_checklist", id = field.Id, offset, new_id = newId };
+                object split = new { type = field.Checklist ? "split_checklist" : "split_paragraph",
+                    id = field.Id, offset, new_id = newId };
                 var operations = offset == end ? new[] { split } : new[] { Replace(field, offset, end, ""), split };
-                Project(editor!.Apply(revision, operations, false));
+                ApplyBatch(operations);
                 var next = views[newId].Fields[0].Control;
                 next.Focus(FocusState.Programmatic);
                 next.Document.Selection.SetRange(0, 0);
+            });
+        }
+        else if (!prototypeMode && key == VirtualKey.Back && field.Cell is null && Selection(field) == (0, 0))
+        {
+            var index = blockOrder.IndexOf(field.Id);
+            if (index <= 0) return;
+            var previous = views[blockOrder[index - 1]];
+            if (ChecklistSort.IsChecked == true && (field.Checklist || previous.Kind == "checklist")) return;
+            if (previous.Fields is not [{ Cell: null } target]) return;
+            args.Handled = true;
+            Run(() =>
+            {
+                var offset = target.Content.Text.Length;
+                Apply(new { type = "merge_previous", id = field.Id });
+                target.Control.Focus(FocusState.Programmatic);
+                target.Control.Document.Selection.SetRange(offset, offset);
             });
         }
     }
@@ -392,6 +502,16 @@ public sealed partial class MainPage : Page
 
     private void Report(string message = "")
     {
+        if (!prototypeMode)
+        {
+            Status.Text = message.Length > 0 ? message
+                : pending is not null ? "Có thay đổi chưa lưu"
+                : IsComposing ? "Đang nhập…"
+                : currentNote is null ? "Chọn hoặc tạo ghi chú."
+                : currentNote.Deleted ? "Ghi chú đã xóa"
+                : "Đã lưu";
+            return;
+        }
         var composition = views.Values.SelectMany(view => view.Fields).Any(field => field.Composing)
             ? " · IME composing" : "";
         Status.Text = $"Revision {revision}{composition} · {message}\nEdit to projection: {Summary(typing)} · Patch: {Summary(patches)}";

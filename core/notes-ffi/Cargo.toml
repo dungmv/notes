@@ -7,14 +7,18 @@ edition.workspace = true
 crate-type = ["rlib", "staticlib", "cdylib"]
 
 [features]
-c-editor = []
+c-editor = ["dep:base64"]
 bindgen = ["uniffi/cargo-metadata", "uniffi/cli"]
 
 [dependencies]
+base64 = { version = "0.22.1", optional = true }
 serde = "1"
 serde_json = "1"
 notes-app = { path = "../notes-app" }
 uniffi = { version = "0.33.0", default-features = false, features = ["macro-scaffolding"] }
+
+[dev-dependencies]
+tempfile = "3.27"
 
 [[bin]]
 name = "uniffi-bindgen-swift"

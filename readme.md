@@ -5,6 +5,7 @@ Monorepo cho ứng dụng ghi chú. Xem kiến trúc và lộ trình trong [đ�
 | Thành phần | Thư mục | Công nghệ |
 | --- | --- | --- |
 | Ứng dụng macOS | `clients/macos/` | SwiftUI, Xcode, macOS 14+ |
+| Ứng dụng Windows | `clients/windows/Notes/` | WinUI 3, .NET 11, Windows App SDK |
 | Core dùng chung | `core/` | Rust, Cargo workspace, UniFFI |
 | Backend | `backend/` | Java 21, Spring Boot 4.1.3, Maven Wrapper |
 
@@ -29,6 +30,23 @@ xcodebuild -project clients/macos/Notes.xcodeproj -scheme Notes \
 open target/xcode/Build/Products/Debug/Notes.app
 ```
 
+## Windows
+
+Cần .NET SDK 11, Rust stable với target MSVC và công cụ C++ của Visual Studio Build Tools. Chạy từ root repo.
+
+```powershell
+./scripts/build-windows-core.ps1 -Run
+```
+
+App lưu dữ liệu trong `%LOCALAPPDATA%\Notes`. Dùng thư mục riêng khi chạy thử.
+
+```powershell
+./scripts/build-windows-core.ps1 -Run -DataDirectory target/m1-native
+./scripts/build-windows-core.ps1 -Run -ReplayM0
+```
+
+[Luồng nghiệm thu M1 Windows](fixtures/m1/README.md)
+
 ## Rust
 
 Kiểm tra Cargo workspace từ root repo.
@@ -37,7 +55,7 @@ Kiểm tra Cargo workspace từ root repo.
 cargo test --workspace --locked
 ```
 
-`notes-app` cung cấp API lõi. `notes-ffi` xuất API sang Swift qua UniFFI.
+`notes-app` cung cấp API lõi. `notes-ffi` xuất API sang Swift qua UniFFI và sang WinUI qua C ABI.
 
 ## Backend
 

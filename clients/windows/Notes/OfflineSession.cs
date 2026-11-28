@@ -1,0 +1,79 @@
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
+
+namespace Notes;
+
+internal sealed class OfflineSession : SafeHandleZeroOrMinusOneIsInvalid
+{
+    private const string Library = "notes_ffi.dll";
+    private static readonly JsonSerializerOptions Json = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+    };
+
+    private OfflineSession(IntPtr native) : base(ownsHandle: true) => SetHandle(native);
+
+    internal static OfflineSession Open(string directory)
+    {
+        ReadReply(notes_offline_open(directory, out var native));
+        return new OfflineSession(native);
+    }
+
+    internal T Call<T>(object request) =>
+        ReadReply(notes_offline_call(this, JsonSerializer.Serialize(request, Json))).Deserialize<T>(Json)!;
+
+    internal void Call(object request) => Call<JsonElement>(request);
+
+    internal EditorUpdate Apply(ulong revision, object[] operations, bool external) =>
+        Call<EditorUpdate>(new { type = "apply", batch = new { revision, operations, external } });
+
+    internal EditorUpdate History(ulong revision, bool redo) =>
+        Call<EditorUpdate>(new { type = "history", revision, redo });
+
+    private static JsonElement ReadReply(IntPtr buffer)
+    {
+        try
+        {
+            using var reply = JsonDocument.Parse(Marshal.PtrToStringUTF8(buffer)
+                ?? throw new InvalidOperationException("Core không trả dữ liệu."));
+            if (reply.RootElement.TryGetProperty("error", out var error))
+                throw new InvalidOperationException(error.GetString());
+            return reply.RootElement.GetProperty("value").Clone();
+        }
+        finally { notes_m0_string_free(buffer); }
+    }
+
+    protected override bool ReleaseHandle()
+    {
+        notes_offline_free(handle);
+        return true;
+    }
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr notes_offline_open(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path, out IntPtr session);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr notes_offline_call(OfflineSession session,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string request);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void notes_offline_free(IntPtr session);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void notes_m0_string_free(IntPtr buffer);
+}
+
+internal sealed record FolderItem(string Id, string Name, string Kind)
+{
+    public override string ToString() => Name;
+}
+
+public sealed record NoteItem(string Id, string FolderId, string Title, string Snippet, bool Deleted)
+{
+    public string DisplayTitle => Title.Length == 0 ? "Ghi chú chưa có tiêu đề" : Title;
+    public override string ToString() => DisplayTitle;
+}
+
+internal sealed record TextMatch(int Start, int End);

@@ -12,7 +12,7 @@
 ## Môi trường và cách chạy
 
 - macOS 14 trở lên với Xcode, Rust và bộ gõ tiếng Việt Telex. Chạy `bash scripts/build-macos-core.sh` từ repo, sau đó mở `clients/macos/Notes.xcodeproj` và chạy scheme **Notes**. Ghi model máy, phiên bản macOS/Xcode và trạng thái **TextKit 2** trên màn hình.
-- Windows x64 hiện dùng .NET SDK 11, Windows App SDK 2.7.0, Rust MSVC và WinApp CLI. Chạy `./scripts/build-windows-core.ps1 -Run` từ repo. Trong Settings, thêm tiếng Việt và bàn phím Vietnamese Telex, rồi chọn qua `Win+Space` trước khi thử. Ghi phiên bản Windows, kiến trúc, Windows App SDK, adapter và binding.
+- Windows x64 hiện dùng .NET SDK 11, Windows App SDK 2.7.0, Rust MSVC và WinApp CLI. Chạy `./scripts/build-windows-core.ps1 -Run -ReplayM0` từ repo. Trong Settings, thêm tiếng Việt và bàn phím Vietnamese Telex, rồi chọn qua `Win+Space` trước khi thử. Ghi phiên bản Windows, kiến trúc, Windows App SDK, adapter và binding.
 - SQLite dùng `cargo run --locked --release -p notes-app --example m0_commit`. Mỗi lượt tạo DB SQLite mới dưới `target/m0-commit`, áp đúng tám thao tác.
 
 ## Ca bàn phím và kết quả mong đợi

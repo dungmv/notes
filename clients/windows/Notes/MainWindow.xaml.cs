@@ -23,5 +23,10 @@ public sealed partial class MainWindow : Window
 
         // Navigate the root frame to the main page on startup.
         RootFrame.Navigate(typeof(MainPage));
+        AppWindow.Closing += (_, args) =>
+        {
+            if (RootFrame.Content is MainPage page && !page.TryCloseEditor())
+                args.Cancel = true;
+        };
     }
 }

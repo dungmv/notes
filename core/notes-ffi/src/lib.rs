@@ -9,3 +9,6 @@ mod editor;
 
 #[cfg(feature = "c-editor")]
 mod c_editor;
+
+#[cfg(feature = "c-editor")]
+mod c_offline;

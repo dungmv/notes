@@ -26,11 +26,15 @@ Thứ tự phát hành là macOS offline, Windows offline, beta đồng bộ r�
 
 ## M1 · MVP macOS offline
 
+[Kế hoạch triển khai và danh sách task M1](./plans/20261128101843-m1-macos-offline.md)
+
 - Hoàn thiện luồng từ Rust core đến SwiftUI/AppKit. Lưu thư mục, ghi chú và tài liệu rich text CRDT trong SQLite, lưu ảnh trong blob store và dùng FTS5 để tìm kiếm cục bộ. Trạng thái **Đã lưu** xuất hiện sau khi core xác nhận commit.
 - Giao diện ba cột hỗ trợ tạo, sửa, di chuyển, xóa và khôi phục ghi chú. Editor có định dạng cơ bản, checklist, dán ảnh tại con trỏ và liên kết ghi chú bằng `>>`. Người dùng có thể tìm trong ghi chú hoặc tìm toàn bộ bằng tiếng Việt không dấu.
 - Nghiệm thu trên macOS với mạng tắt. Kiểm tra mở lại sau khi dừng tiến trình ngay sau xác nhận lưu, lỗi ghi và thử lại, migration SQLite, phím tắt, checklist và nhãn liên kết khi đổi tên ghi chú đích. [Lưu trữ](./specs/02-data-model-and-storage.md) · [Tính năng editor](./specs/03-features-and-editor.md)
 
 ## M2 · Windows và bộ kiểm thử desktop chung
+
+[Kế hoạch triển khai và danh sách task M2](./plans/20261128095337-m2-desktop-offline.md)
 
 - Xây dựng client WinUI 3 bằng adapter đã chốt ở M0. Dùng lại Rust core, định dạng tài liệu, logic tìm kiếm và lưu trữ. Áp dụng quy ước bàn phím và điều hướng của Windows.
 - Chạy cùng bộ dữ liệu và ca nghiệm thu trên macOS và Windows. Kiểm tra hợp đồng Swift/C# qua FFI, mở lại sau khi dừng tiến trình, phần soạn thảo rich text và tương thích tài liệu mẫu theo cả hai chiều.

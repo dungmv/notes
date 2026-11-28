@@ -27,3 +27,11 @@
 - Hoàn thành: toolbar bảng (tạo bảng 2×2, ±hàng/cột, di chuyển hàng/cột), Tag Browser sidebar lọc `#tag`, tạo Smart Folder qua form, Gallery View (thẻ tiêu đề/snippet), Quick Note Win+Alt+N (cửa sổ nổi, phiên riêng, lưu vào inbox), nút Xuất/Nhập.
 - Kiểm chứng: build x64 xanh; nghiệm thu M1 6/6 PASS sau khi thêm UI.
 - Còn lại: thumbnail Gallery (TD-018), tag pill render (TD-018), đếm ghi chú theo tag hiển thị trên sidebar.
+
+## Kết quả test bản dev (--verify-m4, 2026-11-28)
+
+Harness `Testing/DevM4Acceptance.cs` chạy trên bản dev Debug với kho SQLCipher (header không còn `SQLite format 3`): **6/6 PASS** — bảng (chèn/thêm-hàng/sửa-ô/di-chuyển/xóa-hàng), tag inline + Tag Browser + tìm `#tag`, Smart Folder (tạo/đánh giá/chặn DSL sai), Locked Notes (khóa→scrub→mở bằng màn hình khóa→khóa lại→gỡ bảo vệ→FTS khôi phục), export/import Markdown round trip có bảng + ảnh, Gallery/List toggle.
+
+Harness phát hiện và đã sửa 2 bug UI thật:
+1. `Upsert` không dựng lại lưới ô khi bảng đổi cấu trúc → các ô mới không xuất hiện (sửa: rebuild khi số ô thay đổi).
+2. `SetCurrent` early-return khi cùng note id nên chuyển trạng thái khóa không rebuild → khóa xong vẫn ở editor (sửa: so sánh thêm `Locked`).

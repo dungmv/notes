@@ -82,7 +82,12 @@ public sealed partial class MainPage : Page
     private void Upsert(int index, Block block, bool redo = false)
     {
         Field? previous = null;
-        if (views.TryGetValue(block.Id, out var existing) && existing.Kind != block.Kind)
+        // Bảng đổi cấu trúc (thêm/xóa hàng-cột) phải dựng lại lưới ô, không
+        // chỉ chiếu nội dung vào các ô cũ.
+        var rebuild = views.TryGetValue(block.Id, out var existing) &&
+            (existing.Kind != block.Kind ||
+             (block.Rows is { } dims && existing.Fields.Length != dims.Sum(row => row.Length)));
+        if (rebuild)
         {
             if (existing.Fields.Contains(active)) previous = active;
             Blocks.Children.Remove(existing.Root);

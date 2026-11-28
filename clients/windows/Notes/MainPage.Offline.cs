@@ -76,8 +76,9 @@ public sealed partial class MainPage
 #if DEBUG
         var verify = args.Contains("--verify-m1");
         var verifyM3 = args.Contains("--verify-m3");
+        var verifyM4 = args.Contains("--verify-m4");
         var m2 = args.SingleOrDefault(arg => arg.StartsWith("--m2-", StringComparison.Ordinal));
-        if ((verify || verifyM3) && (index < 0 || File.Exists(Path.Combine(root, "notes.sqlite3"))))
+        if ((verify || verifyM3 || verifyM4) && (index < 0 || File.Exists(Path.Combine(root, "notes.sqlite3"))))
             throw new InvalidOperationException("--verify cần --data-dir trỏ tới thư mục thử nghiệm mới.");
         if (m2 is not null && (index < 0 || !File.Exists(Path.Combine(root, "notes.sqlite3"))))
             throw new InvalidOperationException("Nghiệm thu M2 cần --data-dir chứa fixture desktop.");
@@ -109,6 +110,7 @@ public sealed partial class MainPage
             $"{DateTime.Now:HH:mm:ss.fff} open-offline-done\n");
         if (verify) DispatcherQueue.TryEnqueue(() => _ = VerifyOffline(root));
         if (verifyM3) DispatcherQueue.TryEnqueue(() => _ = VerifyM3(root));
+        if (verifyM4) DispatcherQueue.TryEnqueue(() => _ = VerifyM4(root));
         if (m2 is not null) DispatcherQueue.TryEnqueue(() => _ = VerifyM2(root, m2));
 #endif
     }
@@ -175,7 +177,8 @@ public sealed partial class MainPage
 
     private void SetCurrent(NoteItem? note)
     {
-        if (note is not null && note.Id == currentNote?.Id && note.Deleted == currentNote.Deleted) return;
+        if (note is not null && note.Id == currentNote?.Id && note.Deleted == currentNote.Deleted &&
+            note.Locked == currentNote.Locked) return;
         if (currentNote is not null && active is not null)
         {
             var (start, end) = Selection(active);

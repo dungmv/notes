@@ -6,7 +6,9 @@ Tạo fixture rich text dùng chung cho Rust, macOS và Windows. Bao phủ tiế
 
 ## Tiêu chí nghiệm thu
 
-- [ ] Có chuỗi thao tác mẫu và trạng thái tài liệu mong đợi để cả hai client dùng chung.
-- [ ] Có hướng dẫn chạy ca IME bằng bàn phím và ghi nhận môi trường thử macOS, Windows.
+- [x] Có chuỗi thao tác mẫu và trạng thái tài liệu mong đợi để cả hai client dùng chung.
+- [x] Có hướng dẫn chạy ca IME bằng bàn phím và ghi nhận môi trường thử macOS, Windows.
+
+[Fixture v1 và hướng dẫn](../../fixtures/m0/README.md)
 
 [Kế hoạch M0](../plans/20261127174136-m0-editor-ffi-prototype.md#bộ-ca-nghiệm-thu)

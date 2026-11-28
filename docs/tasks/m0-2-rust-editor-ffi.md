@@ -6,8 +6,10 @@ Triển khai phần mô hình CRDT cần cho fixture và xuất hợp đồng ed
 
 ## Tiêu chí nghiệm thu
 
-- [ ] Client mở được tài liệu mẫu, gửi batch thao tác và nhận patch gia tăng theo block.
-- [ ] Test Rust bao phủ round-trip, range ngoài biên, cắt cặp surrogate và kết quả patch trên fixture.
+- [x] Client mở được tài liệu mẫu, gửi batch thao tác và nhận patch gia tăng theo block.
+- [x] Test Rust bao phủ round-trip, range ngoài biên, cắt cặp surrogate và kết quả patch trên fixture.
 - [ ] Swift gọi được API editor qua UniFFI và API phiên bản hiện có tiếp tục hoạt động.
+
+WinUI đã replay qua C ABI. Generator Swift đã xuất API editor và `coreVersion`. Cần chạy client macOS để xác minh gọi API. [Kết quả](../m0-editor-prototype-results.md#rust-và-binding)
 
 [Kế hoạch M0](../plans/20261127174136-m0-editor-ffi-prototype.md)

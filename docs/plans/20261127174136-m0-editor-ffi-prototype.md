@@ -33,3 +33,5 @@ M0.3–M0.5 có thể tiến hành độc lập sau khi hợp đồng dùng chun
 - Ghi quyết định adapter, binding và batch kèm kết quả đo trong tài liệu nghiệm thu. Cập nhật [sổ nợ kỹ thuật](../technical-debt.md) với các giới hạn, đánh đổi và phép thử còn thiếu. Chỉ chuyển `TD-001` sang `Resolved` sau khi có đủ kết quả Windows và số đo batch.
 
 Tham chiếu [kiến trúc FFI](../specs/01-architecture-and-ffi.md), [hợp đồng lưu trữ](../specs/02-data-model-and-storage.md), [đặc tả editor](../specs/03-features-and-editor.md) và [nghiệm thu client](../specs/05-platform-clients-and-roadmap.md).
+
+[Fixture và hướng dẫn tái hiện](../../fixtures/m0/README.md) · [Kết quả nghiệm thu đang mở](../m0-editor-prototype-results.md)

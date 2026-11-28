@@ -7,12 +7,11 @@ struct NotesApp: App {
 
     var body: some Scene {
         WindowGroup("Notes") {
-            ContentUnavailableView {
-                Label("Notes", systemImage: "note.text")
-            } description: {
-                Text("Rust core \(version)")
-            }
-            .frame(minWidth: 480, minHeight: 320)
+            EditorPrototype(version: version)
+                .frame(minWidth: 600, minHeight: 420)
+        }
+        .commands {
+            CommandGroup(replacing: .undoRedo) { }
         }
     }
 }

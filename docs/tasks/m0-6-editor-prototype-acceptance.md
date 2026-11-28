@@ -10,4 +10,6 @@ Tổng hợp kết quả theo từng ca và từng nền tảng. Dùng bằng ch
 - [ ] Có tài liệu ghi quyết định kỹ thuật cùng số đo, giới hạn và ảnh hưởng đến M1/M2.
 - [ ] Cập nhật sổ nợ kỹ thuật. Chuyển `TD-001` sang `Resolved` khi đủ kết quả Windows và số đo batch.
 
+[Biên bản nghiệm thu đang mở](../m0-editor-prototype-results.md) lưu số đo, bằng chứng và các quyết định tạm thời. `TD-001` ở trạng thái `In Progress` trong khi chờ các ca native còn thiếu.
+
 [Kế hoạch M0](../plans/20261127174136-m0-editor-ffi-prototype.md#đo-lường-và-điều-kiện-đóng-m0) · [Sổ nợ kỹ thuật](../technical-debt.md)

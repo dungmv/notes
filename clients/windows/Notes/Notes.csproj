@@ -31,6 +31,11 @@
   <ItemGroup>
     <Content Include="Assets\AppIcon.ico" CopyToPublishDirectory="PreserveNewest" />
     <Manifest Include="$(ApplicationManifest)" />
+    <Content Include="$(M0CoreDll)" Link="notes_ffi.dll" CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" Condition="'$(M0CoreDll)' != ''" />
+    <Content Include="../../../fixtures/m0/operations-v1.json;../../../fixtures/m0/expected-v1.json"
+             Link="M0/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!--

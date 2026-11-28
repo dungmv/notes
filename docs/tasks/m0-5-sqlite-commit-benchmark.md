@@ -6,8 +6,10 @@ Dùng SQLite file cục bộ với WAL và `synchronous=FULL`. Đo thời gian t
 
 ## Tiêu chí nghiệm thu
 
-- [ ] Lưu lệnh chạy, cấu hình, số lượt, kích thước batch và kết quả p50/p95 cho từng phương án.
-- [ ] Kiểm tra xác nhận đến sau commit, flush, thứ tự, dữ liệu sau khi dừng tiến trình, lỗi ghi và retry.
-- [ ] Đề xuất cách gom batch dựa trên số đo và độ bền dữ liệu.
+- [x] Lưu lệnh chạy, cấu hình, số lượt, kích thước batch và kết quả p50/p95 cho từng phương án.
+- [x] Kiểm tra xác nhận đến sau commit, flush, thứ tự, dữ liệu sau khi dừng tiến trình, lỗi ghi và retry.
+- [x] Đề xuất cách gom batch dựa trên số đo và độ bền dữ liệu.
+
+[Số đo SQLite và lựa chọn ban đầu](../m0-editor-prototype-results.md#số-đo-sqlite)
 
 [Kế hoạch M0](../plans/20261127174136-m0-editor-ffi-prototype.md#đo-lường-và-điều-kiện-đóng-m0)

@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "revision": 0,
+  "blocks": [
+    {
+      "id": "intro",
+      "kind": "paragraph",
+      "content": {
+        "text": "Tiếng Việt 👩🏽‍💻 thử.",
+        "marks": [
+          {
+            "start": 0,
+            "end": 10,
+            "style": "bold"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tasks",
+      "kind": "checklist",
+      "content": {
+        "text": "Chuẩn bị",
+        "marks": [
+          {
+            "start": 0,
+            "end": 5,
+            "style": "italic"
+          }
+        ]
+      },
+      "depth": 0,
+      "checked": false
+    },
+    {
+      "id": "tasks-child",
+      "kind": "checklist",
+      "content": {
+        "text": "Bản nháp",
+        "marks": []
+      },
+      "depth": 1,
+      "checked": true
+    },
+    {
+      "id": "table",
+      "kind": "table",
+      "rows": [
+        [
+          {
+            "text": "Mục",
+            "marks": []
+          },
+          {
+            "text": "Giá trị",
+            "marks": []
+          }
+        ],
+        [
+          {
+            "text": "Ghi chú",
+            "marks": []
+          },
+          {
+            "text": "Một",
+            "marks": []
+          }
+        ]
+      ]
+    }
+  ]
+}

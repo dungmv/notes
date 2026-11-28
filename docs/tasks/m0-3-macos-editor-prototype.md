@@ -9,4 +9,6 @@ Bọc `NSTextView` trong SwiftUI, kết nối với Rust qua UniFFI và áp patc
 - [ ] Chạy bộ ca chung trên macOS, gồm IME tiếng Việt, emoji, vùng chọn, undo/redo, checklist và bảng cơ bản.
 - [ ] Lưu kết quả từng ca, cấu hình máy, phiên bản macOS và số đo độ trễ gõ, áp patch.
 
+Đã thêm [adapter SwiftUI/AppKit](../../clients/macos/Notes/EditorPrototype.swift) và sinh bindings. Cần máy macOS với Xcode và Telex để build và chạy [bộ ca native](../../fixtures/m0/README.md).
+
 [Kế hoạch M0](../plans/20261127174136-m0-editor-ffi-prototype.md#bộ-ca-nghiệm-thu)

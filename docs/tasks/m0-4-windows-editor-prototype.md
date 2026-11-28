@@ -6,9 +6,9 @@ Nối `RichEditBox` với hợp đồng Rust dùng chung. Thử UniFFI C# trư�
 
 ## Tiêu chí nghiệm thu
 
-- [ ] Chạy bộ ca chung trên Windows, ghi rõ phiên bản OS, adapter, binding và kết quả từng ca.
-- [ ] Lưu số đo độ trễ gõ, áp patch và bằng chứng chạy cho phương án được chọn. Ghi rõ các ca chưa chạy nếu còn thiếu môi trường.
+- [x] Chạy bộ ca chung trên Windows, ghi rõ phiên bản OS, adapter, binding và kết quả từng ca.
+- [x] Lưu số đo độ trễ gõ, áp patch và bằng chứng chạy cho phương án được chọn. Ghi rõ các ca chưa chạy nếu còn thiếu môi trường.
 
-WinUI đã chạy và replay qua C ABI. [Kết quả từng ca, số đo patch và ảnh](../m0-editor-prototype-results.md) có các phép thử còn chờ desktop tương tác và IME Telex.
+Windows M0.4 đạt với WinUI `RichEditBox` và C ABI. Đã chạy replay, Unicode, checklist, bảng, undo/redo và composition, commit/hủy với Vietnamese Telex tích hợp. [Kết quả từng ca và số đo](../m0-editor-prototype-results.md)
 
 [Kế hoạch M0](../plans/20261127174136-m0-editor-ffi-prototype.md#bộ-ca-nghiệm-thu)

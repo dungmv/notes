@@ -69,7 +69,7 @@ public sealed partial class MainPage : Page
         Report();
     }
 
-    private void Upsert(int index, Block block)
+    private void Upsert(int index, Block block, bool redo = false)
     {
         if (!views.TryGetValue(block.Id, out var view))
         {
@@ -121,7 +121,7 @@ public sealed partial class MainPage : Page
         {
             var content = field.Cell is { } cell ? block.Rows![cell.Row][cell.Column] : block.Content!;
             if (field.Content.Text != content.Text || !field.Content.Marks.SequenceEqual(content.Marks))
-                Project(field, content);
+                Project(field, content, redo && field == active);
         }
     }
 
@@ -143,20 +143,25 @@ public sealed partial class MainPage : Page
         {
             field.Composing = true;
             field.CompositionStart = box.Document.Selection.StartPosition;
+            Report();
         };
         box.TextCompositionChanged += (_, args) => field.CompositionStart = args.StartIndex;
         box.TextCompositionEnded += (_, _) =>
         {
             field.Composing = false;
+            field.Started = Stopwatch.GetTimestamp();
             Run(() =>
             {
                 SubmitText(field);
-                while (deferred.TryPeek(out var target) && !target.Field.Composing)
-                {
-                    deferred.Dequeue();
-                    ApplyExternal(target.Field, target.Offset);
-                }
+                Report();
             });
+            // The key that committed the composition can still insert a delimiter.
+            // Project queued patches after RichEditBox finishes handling that key.
+            if (deferred.Count != 0)
+            {
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                    () => Run(FlushDeferred));
+            }
         };
         return field;
     }
@@ -202,7 +207,7 @@ public sealed partial class MainPage : Page
         return (start, end, current[start..nextEnd]);
     }
 
-    private static void Project(Field field, RichText content)
+    private static void Project(Field field, RichText content, bool advanceCaret)
     {
         var doc = field.Control.Document;
         var before = ReadText(field);
@@ -213,7 +218,10 @@ public sealed partial class MainPage : Page
         {
             var change = Difference(before, content.Text);
             doc.GetRange(change.Start, change.End).SetText(TextSetOptions.None, change.Text.Replace('\n', '\r'));
-            int Translate(int offset) => offset <= change.Start ? offset :
+            // A collapsed caret follows text restored by redo at its insertion point.
+            var followInsertion = advanceCaret && anchor == end && anchor == change.Start && change.Start == change.End;
+            int Translate(int offset) => followInsertion ? offset + change.Text.Length :
+                offset <= change.Start ? offset :
                 offset >= change.End ? offset + change.Text.Length - (change.End - change.Start) :
                 change.Start + change.Text.Length;
             anchor = Translate(anchor);
@@ -233,7 +241,7 @@ public sealed partial class MainPage : Page
         field.Content = content;
     }
 
-    private void Project(EditorUpdate update)
+    private void Project(EditorUpdate update, bool redo = false)
     {
         if (update.BaseRevision != revision) throw new InvalidOperationException("Patch revision mismatch.");
         var started = Stopwatch.GetTimestamp();
@@ -249,7 +257,7 @@ public sealed partial class MainPage : Page
                     Blocks.Children.Remove(view.Root);
                     views.Remove(patch.Id!);
                 }
-                else Upsert(patch.Index, patch.Block!);
+                else Upsert(patch.Index, patch.Block!, redo);
             }
             revision = update.Revision;
         }
@@ -272,6 +280,15 @@ public sealed partial class MainPage : Page
         offset = Math.Clamp(offset, 0, text.Length);
         if (offset < text.Length && char.IsLowSurrogate(text[offset])) offset--;
         Apply(Replace(field, offset, offset, "✓ "), external: true);
+    }
+
+    private void FlushDeferred()
+    {
+        while (deferred.TryPeek(out var target) && !target.Field.Composing)
+        {
+            deferred.Dequeue();
+            ApplyExternal(target.Field, target.Offset);
+        }
     }
 
     private void SendPatch(VirtualKey key)
@@ -320,7 +337,7 @@ public sealed partial class MainPage : Page
     private void History(bool redo)
     {
         if (editor is not null && !views.Values.SelectMany(view => view.Fields).Any(field => field.Composing))
-            Project(editor.History(revision, redo));
+            Project(editor.History(revision, redo), redo);
     }
 
     private void PageKeys(object sender, KeyRoutedEventArgs args)
@@ -375,7 +392,9 @@ public sealed partial class MainPage : Page
 
     private void Report(string message = "")
     {
-        Status.Text = $"Revision {revision} · {message}\nEdit to projection: {Summary(typing)} · Patch: {Summary(patches)}";
+        var composition = views.Values.SelectMany(view => view.Fields).Any(field => field.Composing)
+            ? " · IME composing" : "";
+        Status.Text = $"Revision {revision}{composition} · {message}\nEdit to projection: {Summary(typing)} · Patch: {Summary(patches)}";
     }
 
     private static string Summary(List<double> samples)

@@ -1,6 +1,6 @@
 # Kết quả prototype editor M0
 
-**Trạng thái ngày 2026-11-28** — Đã có fixture, hợp đồng Rust, hai adapter và benchmark SQLite. M0 còn mở để nghiệm thu native. [Kế hoạch](plans/20261127174136-m0-editor-ffi-prototype.md) · [Ca thử và lệnh chạy](../fixtures/m0/README.md)
+**Trạng thái ngày 2026-11-28** — Windows M0.4 đạt các ca native. M0 còn mở để nghiệm thu macOS. [Kế hoạch](plans/20261127174136-m0-editor-ffi-prototype.md) · [Ca thử và lệnh chạy](../fixtures/m0/README.md)
 
 ## Kết quả theo ca
 
@@ -9,16 +9,33 @@ Windows chạy trên Windows 11 build 26300 x64, Intel Core i5-13500 (20 luồng
 | Ca | Windows | macOS |
 | --- | --- | --- |
 | Mở và replay fixture | **Đạt.** WinApp UI Automation kích hoạt replay. Revision 8, Rust snapshot và text trong các control khớp fixture. Nội dung đoạn đầu là `Tiếng Việt 🙂 thử và á.`, ô R1 C1 là `Tên`, ô R2 C2 là `Hai`. [Ảnh kết quả](m0-windows-replay.png) | **Chưa chạy native.** Đã sinh binding Swift từ thư viện và đối chiếu chữ ký dùng trong adapter. |
-| IME tiếng Việt, commit/hủy và patch | **Chưa chạy.** Phiên desktop chỉ có layout US `0409:00000409`. Cần Telex để xác minh F6 giữ composition và F7 áp marker sau composition. | **Chưa chạy.** Cần xác minh trạng thái TextKit 2 và bộ gõ Telex. |
-| Unicode và vùng chọn | **Đạt phần replay Unicode.** Rust kiểm tra ánh xạ hai chiều, surrogate và range ngoài biên. Chọn, xóa và thay trực tiếp bằng phím còn chờ một phiên desktop điều khiển được. | **Chưa chạy native.** |
-| Undo/redo và patch | **Chưa xác minh bằng bàn phím.** Rust đạt ca undo/redo sau external patch ở block khác và ca undo/redo tách mục. | **Chưa chạy native.** |
-| Checklist | **Đạt phần replay và toggle.** UI Automation đổi checkbox mục đầu từ off sang on. Replay render đúng mục mới, hai cấp lồng và dòng phụ. Cần xác minh riêng Return, Shift+Return và Tab/Shift+Tab. | **Chưa chạy native.** |
-| Bảng | **Đạt phần replay.** Hai ô ở hai vị trí cập nhật theo thứ tự, bảng giữ đủ bốn ô. Ca bàn phím sửa ô rồi F8 và kiểm tra caret còn chờ xác minh. | **Chưa chạy native.** |
+| IME tiếng Việt, commit/hủy và patch | **Đạt với Vietnamese Telex tích hợp.** F6 cập nhật checklist và giữ preedit. F7 đợi composition kết thúc, sau đó chèn marker đúng vị trí và giữ caret sau dấu cách commit. Xóa preedit về rỗng hủy phần nhập mà giữ bản đã commit. | **Chưa chạy.** Cần xác minh trạng thái TextKit 2 và bộ gõ Telex. |
+| Unicode và vùng chọn | **Đạt.** Từ fixture gốc, Home, 11 lần Right và Shift+Right chọn toàn bộ 👩🏽‍💻. Sau F6, vùng chọn vẫn giữ. Thay bằng 🙂 rồi Backspace chỉ xóa emoji. Rust kiểm tra ánh xạ hai chiều, surrogate và range ngoài biên. | **Chưa chạy native.** |
+| Undo/redo và patch | **Đạt.** Trên bản đã sửa caret, từ revision 0 gõ `x`, nhấn F6, Ctrl+Z, Ctrl+Y rồi gõ `y`. Đoạn văn kết thúc bằng `xy` ở revision 5 và checklist giữ marker F6. Undo/redo không phát sinh mẫu nhập. | **Chưa chạy native.** |
+| Checklist | **Đạt.** Shift+Return thêm dòng trong cùng mục, Return tách mục và chuyển caret, Tab/Shift+Tab đổi cấp và giữ focus. UI Automation đổi checkbox mục đầu từ off sang on. | **Chưa chạy native.** |
+| Bảng | **Đạt.** Tại R2 C2, gõ `x`, nhấn F8 rồi gõ `y`. R2 C1 nhận marker, R2 C2 thành `Haixy`, hàng đầu giữ nguyên. | **Chưa chạy native.** |
 | Commit/flush và retry | **Đạt trong benchmark SQLite độc lập.** Kiểm tra cả hai chiến lược ghi. | **Chưa đo trên macOS.** |
 
-WinApp CLI mở app với package identity, đọc được cây UI Automation và gọi nút replay. Việc gửi phím thiếu foreground hoặc bị computer-use ngắt khi phát hiện thao tác đồng thời. Một lần gửi chuỗi phím cho ô R2 C2 cho thấy giá trị `Hai` nhưng marker ở ô bên cạnh chưa quan sát được, nên giữ ca F8 ở trạng thái chưa xác minh.
+WinApp CLI mở app với package identity và gọi nút replay. Lượt nghiệm thu tiếp theo dùng Computer Use gửi phím vào control native, đối chiếu revision qua UI Automation và kiểm tra text, caret, vùng chọn và bố cục trên cửa sổ Notes.
 
-`./scripts/build-windows-core.ps1` build thành công bản x64 với Rust DLL Release và WinUI Debug. Trong sandbox, build dùng cache NuGet cục bộ qua biến `RestoreSources` vì DNS của `api.nuget.org` bị chặn. Phép đo UI ở dưới dùng bản Rust DLL Debug.
+`./scripts/build-windows-core.ps1` build thành công bản x64 với Rust DLL Release và WinUI Debug. Trong sandbox, build dùng cache NuGet cục bộ qua biến `RestoreSources` vì DNS của `api.nuget.org` bị chặn. Bảng số đo phân biệt lượt Rust DLL Debug và lượt Release.
+
+### Bằng chứng composition trên Windows
+
+Chạy `./scripts/build-windows-core.ps1 -Run` với Rust DLL Release, WinUI Debug, layout Vietnamese Telex tích hợp và UniKey ở chế độ E. Đặt caret cuối đoạn đầu của fixture gốc. Revision, trạng thái IME và nội dung được đọc từ cửa sổ Notes sau mỗi mốc.
+
+| Mốc | Quan sát |
+| --- | --- |
+| Space, gõ `tieeng`, F6, gõ `s` | F6 tăng revision 1 → 2 và vẫn báo `IME composing`. Sau phím `s`, revision vẫn là 2. |
+| Space | Commit `tiếng` và dấu cách ở revision 4. Checklist giữ marker F6. |
+| Gõ `vieet`, F7, gõ `j` | Hiện `Patch queued until IME ends.` và revision giữ ở 4. |
+| Space, gõ `tieengs` | Revision 7 sau commit và áp patch. Sau khi kết thúc từ kế tiếp, UI Automation đọc `Tiếng Việt 👩🏽‍💻 thử. tiếng ✓ việt tiếng`. Dấu cách sau `việt` được giữ và từ sau đứng đúng vị trí. |
+| Gõ `viee`, Backspace ba lần | Preedit biến mất. Revision và nội dung đã commit giữ nguyên, không có mẫu nhập mới. |
+| Gõ `viee`, F7, Backspace ba lần | Sau khi hủy, chỉ marker được commit. Revision 11 → 12, số mẫu nhập giữ ở 9. UI Automation đọc phần cuối `tiếng ✓ việt tiếng ✓ `. |
+
+Escape có thể kết thúc preedit và giữ lại chữ trong Vietnamese Telex. Ở ca trên, Escape kết thúc từ `tiếng` và tăng một revision. Ca hủy được kiểm tra bằng Backspace về preedit rỗng.
+
+UniKey trên layout US cũng cho `tiếng Việt` với F6 giữa từ. UniKey gửi các sửa đổi theo từng phím trong cấu hình này. Bản cuối áp F7 ngay khi gõ `tieeng`, rồi phím `s` tạo `tiêngs`. Giới hạn với bộ gõ ngoài Windows Telex đã được ghi nhận ở [TD-011](technical-debt.md).
 
 ## Rust và binding
 
@@ -28,7 +45,15 @@ WinApp CLI mở app với package identity, đọc được cây UI Automation v
 
 ## Số đo adapter
 
-Một lượt replay v1 trên WinUI gồm 8 thao tác, gửi lần lượt qua C ABI. Áp patch trên UI thread có **p50 1,742 ms, p95 8,774 ms** với 8 mẫu. Các số trên đo đoạn cập nhật control sau khi giải mã patch. Mẫu độ trễ gõ và kết quả IME của Windows, cùng toàn bộ số đo native macOS, còn chờ xác minh. [Ảnh WinUI](m0-windows-replay.png)
+| Lượt Windows | Mẫu | p50 | p95 |
+| --- | ---: | ---: | ---: |
+| Áp patch từ replay v1, Rust DLL Debug | 8 | 1,742 ms | 8,774 ms |
+| Sửa nội dung qua UniKey, checklist và bảng, Rust DLL Debug | 27 | 13,557 ms | 41,206 ms |
+| Áp patch trong lượt UniKey, gồm replay và các phím thử, Rust DLL Debug | 43 | 4,676 ms | 6,074 ms |
+| Sửa nội dung với Windows Vietnamese Telex, Rust DLL Release | 25 | 8,449 ms | 41,261 ms |
+| Áp patch trong lượt Windows Vietnamese Telex, gồm replay, Rust DLL Release | 33 | 3,731 ms | 7,346 ms |
+
+Lượt Telex riêng bắt đầu từ revision 8. Sau một dấu cách và 12 lần gõ `tieengs` + Space, revision là 33. UI Automation xác nhận đoạn văn khớp đầy đủ `Tiếng Việt 🙂 thử và á. ` theo sau bởi 12 lần `tiếng `. Mẫu sửa nội dung gồm 12 commit composition, 12 dấu cách kết thúc từ và dấu cách ban đầu. Đo từ callback bắt đầu sửa hoặc kết thúc composition đến khi UI thread áp xong cập nhật. Mẫu patch bắt đầu sau giải mã phản hồi C ABI. Số đo macOS còn chờ. [Ảnh WinUI](m0-windows-replay.png)
 
 ## Số đo SQLite
 
@@ -44,7 +69,7 @@ Batch giảm từ 240 xuống 95 commit. Cuối chuỗi có flush ngay cho phầ
 ## Lựa chọn cho M1 và M2
 
 - M1 dùng **commit từng thao tác đã hoàn tất** làm mặc định dựa trên p95 hiện tại. Duy trì API nhận batch nguyên tử và ACK sau commit. Đo lại với tài liệu dài, burst nhập và ổ đĩa trên cả hai OS trước khi đổi mặc định. Benchmark đang lưu snapshot mẫu và operation journal bằng một kết nối, tách khỏi vòng đời app native.
-- Giữ `NSTextView` với TextKit 2 và UniFFI Swift, cùng WinUI `RichEditBox` với C ABI, làm các ứng viên M1. Chốt sau khi chạy đủ ca native. Thử WebView2 cục bộ trên các ca bắt buộc mà RichEditBox được xác nhận có lỗi.
+- Chọn WinUI `RichEditBox` với C ABI cho Windows theo kết quả M0.4. Giữ `NSTextView` với TextKit 2 và UniFFI Swift làm ứng viên macOS cho đến khi chạy đủ ca native.
 - M2 cần đánh giá lại hình chiếu bảng, lựa chọn binding C# và hành vi lịch sử khi external patch sửa cùng block. Phần triển khai M0 dùng control cho từng block hoặc ô và undo theo snapshot của block.
 
 [Sổ nợ kỹ thuật](technical-debt.md)

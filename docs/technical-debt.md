@@ -14,6 +14,7 @@ Tài liệu theo dõi và kiểm soát toàn bộ nợ kỹ thuật (technical d
 | TD-004 | Sync transport ([04](./specs/04-sync-and-security.md), [06](./specs/06-backend-spring-boot.md)) | Client polling qua HTTPS giúp giảm hạ tầng. Độ trễ nhận bản sửa phụ thuộc chu kỳ poll và có request ngay cả khi ít thay đổi. | Low | Đo số lượt pull rỗng và độ trễ nhận thay đổi khi cả hai máy đang mở hoặc vừa quay lại app. Điều chỉnh chu kỳ theo kết quả. | Open | 2026-11-27 |
 | TD-005 | Khôi phục E2EE ([07](./specs/07-e2ee-cryptography.md)) | Đã mô tả lớp wrap phục hồi nhưng chưa có hợp đồng lấy bundle và đổi thông tin đăng nhập khi mất mật khẩu. | High | Đặc tả và kiểm thử luồng xác thực phục hồi, cập nhật nguyên tử thông tin đăng nhập và thu hồi phiên trước khi nghiệm thu Phase 3. | Open | 2026-11-27 |
 | TD-006 | macOS / `scripts/build-macos-core.sh` | XCFramework phát triển chỉ có kiến trúc máy build. Swift bindings và thư viện Rust cần được tạo lại bằng script khi mã Rust thay đổi. Cách này giữ bước sinh mã tách khỏi Xcode trong giai đoạn khởi tạo. | Low | Tích hợp bước build Rust vào quy trình build app. Tạo và kiểm tra XCFramework cho cả Apple Silicon và Intel khi chuẩn bị phân phối. | Open | 2026-11-27 |
+| TD-007 | Windows / [`Notes.csproj`](../clients/windows/Notes/Notes.csproj) | Template WinUI dùng phiên bản NuGet `*` cho Windows App SDK và hai gói BuildTools. Lần restore trên máy mới có thể chọn phiên bản khác với bản đã kiểm tra. | Low | Ghim phiên bản các gói NuGet khi thiết lập build Windows trong CI và kiểm tra restore trên máy sạch. | Open | 2026-11-28 |
 
 ---
 

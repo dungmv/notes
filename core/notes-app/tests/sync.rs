@@ -426,7 +426,7 @@ fn two_devices_converge_with_offline_edits_blobs_and_recovery() {
     let mut store_b = Store::open(dir_b.path()).unwrap();
 
     // Device A creates offline note & folder before enabling sync
-    let folder_id = store_a.create_folder("Dự án M3").unwrap();
+    let folder_id = store_a.create_folder("Dự án M3", None).unwrap();
     let note_id = store_a.create_note(&folder_id).unwrap();
     let mut ed_a = store_a.open_note(&note_id).unwrap();
     let blk_id = ed_a.snapshot().blocks[0].id.clone();
@@ -625,7 +625,7 @@ fn live_backend_two_device_e2ee_sync_with_blobs_and_recovery() {
     let mut store_b = Store::open(dir_b.path()).unwrap();
     let mut store_c = Store::open(dir_c.path()).unwrap();
 
-    let folder_id = store_a.create_folder("Live Sync M3").unwrap();
+    let folder_id = store_a.create_folder("Live Sync M3", None).unwrap();
     let note_id = store_a.create_note(&folder_id).unwrap();
     let mut ed_a = store_a.open_note(&note_id).unwrap();
     let blk_id = ed_a.snapshot().blocks[0].id.clone();

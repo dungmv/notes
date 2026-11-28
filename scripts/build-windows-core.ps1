@@ -2,6 +2,11 @@ param([switch]$Run, [string]$DataDirectory, [switch]$ReplayM0, [switch]$VerifyM1
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+# SQLCipher pulls openssl-src which needs a full Perl (MSYS perl bundled with Git
+# misses core modules). Prepend the portable Strawberry Perl if present; see
+# docs/technical-debt.md TD-015.
+$portablePerl = Join-Path $env:LOCALAPPDATA 'NotesBuild/perl/perl/bin'
+if (Test-Path $portablePerl) { $env:PATH = "$portablePerl;$env:PATH" }
 $architecture = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant()
 $triple = @{
     x64 = 'x86_64-pc-windows-msvc'

@@ -14,6 +14,8 @@ namespace Notes;
 
 public sealed partial class MainPage
 {
+    internal static string? DataRootStatic;
+
     private OfflineSession? offline;
     private readonly bool prototypeMode = Environment.GetCommandLineArgs().Contains("--m0-replay") ||
         Environment.GetEnvironmentVariable("NOTES_M0_REPLAY") == "1";
@@ -30,6 +32,10 @@ public sealed partial class MainPage
     private string? dataRoot;
     private (Func<EditorUpdate> Call, bool Redo)? pending;
     private (string Id, Cell? Cell, int Start, int End, string Query)? lastMatch;
+    private bool lockSupported;
+    private string? lockedSessionNoteId;
+    private DispatcherQueueTimer? autoLockTimer;
+    private const int AutoLockMinutes = 5;
 
     private bool ReadOnlyNote => !prototypeMode && (currentNote?.Deleted != false || pending is not null);
     private bool IsComposing => views.Values.SelectMany(view => view.Fields).Any(item => item.Composing);
@@ -76,7 +82,8 @@ public sealed partial class MainPage
         if (m2 is not null && (index < 0 || !File.Exists(Path.Combine(root, "notes.sqlite3"))))
             throw new InvalidOperationException("Nghiệm thu M2 cần --data-dir chứa fixture desktop.");
 #endif
-        var session = await Task.Run(() => OfflineSession.Open(root), cancellation);
+        var session = await Task.Run(async () =>
+            OfflineSession.Open(root, await LocalDbKeyStore.LoadOrCreateAsync(root)), cancellation);
         if (cancellation.IsCancellationRequested)
         {
             session.Dispose();
@@ -84,17 +91,22 @@ public sealed partial class MainPage
         }
         offline = session;
         dataRoot = root;
+        DataRootStatic = root;
         ChecklistSort.IsChecked = offline.Call<bool>(new { type = "checklist_sort" });
+        lockSupported = offline.Call<LockStatusDto>(new { type = "lock_status" }).Supported;
         refreshTimer ??= DispatcherQueue.CreateTimer();
         refreshTimer.Interval = TimeSpan.FromMilliseconds(180);
         refreshTimer.IsRepeating = false;
         refreshTimer.Tick += RefreshTick;
+        SetupAutoLock();
         RefreshFolders("all");
         RefreshNotes();
         SetCurrent(null);
         InitializeSync(root);
         GlobalSearch.Focus(FocusState.Programmatic);
 #if DEBUG
+        if (verify) File.AppendAllText(Path.Combine(root, "verify-trace.log"),
+            $"{DateTime.Now:HH:mm:ss.fff} open-offline-done\n");
         if (verify) DispatcherQueue.TryEnqueue(() => _ = VerifyOffline(root));
         if (verifyM3) DispatcherQueue.TryEnqueue(() => _ = VerifyM3(root));
         if (m2 is not null) DispatcherQueue.TryEnqueue(() => _ = VerifyM2(root, m2));
@@ -151,7 +163,11 @@ public sealed partial class MainPage
         try
         {
             NoteList.ItemsSource = notes;
+            GalleryList.ItemsSource = notes;
             NoteList.SelectedItem = notes.FirstOrDefault(note => note.Id == currentNote?.Id);
+            GalleryList.SelectedItem = galleryMode ? NoteList.SelectedItem : null;
+            NoteList.Visibility = galleryMode ? Visibility.Collapsed : Visibility.Visible;
+            GalleryList.Visibility = galleryMode ? Visibility.Visible : Visibility.Collapsed;
         }
         finally { refreshing = false; }
         UpdateFolderActions();
@@ -160,9 +176,6 @@ public sealed partial class MainPage
     private void SetCurrent(NoteItem? note)
     {
         if (note is not null && note.Id == currentNote?.Id && note.Deleted == currentNote.Deleted) return;
-        var snapshot = note is null
-            ? new EditorSnapshot(0, [])
-            : offline!.Call<EditorSnapshot>(new { type = "open_note", id = note.Id });
         if (currentNote is not null && active is not null)
         {
             var (start, end) = Selection(active);
@@ -170,6 +183,21 @@ public sealed partial class MainPage
         }
         currentNote = note;
         lastMatch = null;
+        lockedSessionNoteId = null;
+        if (note?.Locked == true)
+        {
+            ShowLockScreen(note);
+            SetEditLock();
+            MoveButton.IsEnabled = note.Deleted == false;
+            DeleteButton.IsEnabled = true;
+            DeleteButton.Content = note.Deleted ? "Khôi phục" : "Xóa";
+            Report();
+            return;
+        }
+        HideLockScreen();
+        var snapshot = note is null
+            ? new EditorSnapshot(0, [])
+            : offline!.Call<EditorSnapshot>(new { type = "open_note", id = note.Id });
         ShowSnapshot(snapshot);
         if (note is not null && savedSelections.TryGetValue(note.Id, out var selection) &&
             views.TryGetValue(selection.Block, out var selectedView))
@@ -644,6 +672,371 @@ public sealed partial class MainPage
         RefreshNotes();
     }
 
+    // ---- Tổ chức nâng cao: bảng, tag, Smart Folders, Gallery (M4-W.4) ----
+
+    private bool galleryMode;
+
+    private void InsertTableClick(object sender, RoutedEventArgs args)
+    {
+        if (offline is null || currentNote is null || active is null || ReadOnlyNote || IsComposing) return;
+        if (active.Cell is not null)
+        {
+            Report("Đang ở trong ô bảng rồi.");
+            return;
+        }
+        var (start, end) = Selection(active);
+        var table = new
+        {
+            id = Guid.NewGuid().ToString("N"),
+            kind = "table",
+            rows = new[]
+            {
+                new[] { new { text = "", marks = Array.Empty<object>() }, new { text = "", marks = Array.Empty<object>() } },
+                new[] { new { text = "", marks = Array.Empty<object>() }, new { text = "", marks = Array.Empty<object>() } },
+            },
+        };
+        Run(() => Apply(new
+        {
+            type = "insert_at",
+            id = active.Id,
+            start,
+            end,
+            block = table,
+            tail_id = Guid.NewGuid().ToString("N"),
+        }));
+        Report("Đã chèn bảng 2×2.");
+    }
+
+    private void TableOpClick(object sender, RoutedEventArgs args)
+    {
+        var field = active;
+        if (offline is null || field?.Cell is not { } cell || ReadOnlyNote || IsComposing) return;
+        var code = (string)((Button)sender).Tag;
+        object? operation = code switch
+        {
+            "table_insert_row" => new { type = code, id = field.Id, after_row = (int?)cell.Row },
+            "table_remove_row" => new { type = code, id = field.Id, row = cell.Row },
+            "table_insert_column" => new { type = code, id = field.Id, after_column = (int?)cell.Column },
+            "table_remove_column" => new { type = code, id = field.Id, column = cell.Column },
+            "table_move_row_up" when cell.Row > 0 =>
+                new { type = "table_move_row", id = field.Id, from = cell.Row, to = cell.Row - 1 },
+            "table_move_row_down" =>
+                new { type = "table_move_row", id = field.Id, from = cell.Row, to = cell.Row + 1 },
+            "table_move_column_left" when cell.Column > 0 =>
+                new { type = "table_move_column", id = field.Id, from = cell.Column, to = cell.Column - 1 },
+            "table_move_column_right" =>
+                new { type = "table_move_column", id = field.Id, from = cell.Column, to = cell.Column + 1 },
+            _ => null,
+        };
+        if (operation is null)
+        {
+            Report("Không di chuyển thêm được nữa.");
+            return;
+        }
+        Run(() => Apply(operation));
+    }
+
+    private async void CreateSmartFolderClick(object sender, RoutedEventArgs args)
+    {
+        if (offline is null) return;
+        await RunDialog(async () =>
+        {
+            var name = new TextBox { Header = "Tên Smart Folder", MaxLength = 160 };
+            var tag = new TextBox { Header = "Tag (không cần #)", PlaceholderText = "cong-viec" };
+            var checklist = new CheckBox { Content = "Có checklist" };
+            var attachments = new CheckBox { Content = "Có đính kèm" };
+            var panel = new StackPanel { Spacing = 12 };
+            panel.Children.Add(name);
+            panel.Children.Add(tag);
+            panel.Children.Add(checklist);
+            panel.Children.Add(attachments);
+            var dialog = Dialog("Smart Folder mới", panel, "Tạo");
+            var enabled = () => dialog.IsPrimaryButtonEnabled =
+                name.Text.Trim().Length > 0 &&
+                (tag.Text.Trim().Length > 0 || checklist.IsChecked == true || attachments.IsChecked == true);
+            name.TextChanged += (_, _) => enabled();
+            tag.TextChanged += (_, _) => enabled();
+            checklist.Click += (_, _) => enabled();
+            attachments.Click += (_, _) => enabled();
+            dialog.IsPrimaryButtonEnabled = false;
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            var query = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                tag = tag.Text.Trim() is { Length: > 0 } value ? value : null,
+                has_checklist = checklist.IsChecked == true ? (bool?)true : null,
+                has_attachments = attachments.IsChecked == true ? (bool?)true : null,
+                folder = (string?)null,
+            });
+            var id = offline.Call<string>(new { type = "create_smart_folder", name = name.Text, query });
+            GlobalSearch.Text = "";
+            RefreshFolders(id);
+            SetCurrent(null);
+            RefreshTags();
+            RefreshNotes();
+            Report("Đã tạo Smart Folder.");
+        });
+    }
+
+    private sealed record TagCountDto(string Tag, long Notes)
+    {
+        public override string ToString() => $"#{Tag} ({Notes})";
+    }
+
+    private void RefreshTags()
+    {
+        if (offline is null) return;
+        refreshing = true;
+        try
+        {
+            TagList.ItemsSource = offline.Call<TagCountDto[]>(new { type = "tags_list" });
+        }
+        finally { refreshing = false; }
+    }
+
+    private void TagChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (refreshing || offline is null || TagList.SelectedItem is not TagCountDto tag) return;
+        GlobalSearch.Text = $"#{tag.Tag}";
+        GlobalSearch.Focus(FocusState.Programmatic);
+    }
+
+    private void ViewToggleClick(object sender, RoutedEventArgs args)
+    {
+        galleryMode = !galleryMode;
+        ViewToggle.Content = galleryMode ? "Danh sách" : "Gallery";
+        RefreshNotes();
+    }
+
+    // ---- Import/Export (M4-W.5) ----
+
+    private async Task<string?> PickFolderAsync()
+    {
+        var picker = new Windows.Storage.Pickers.FolderPicker
+        {
+            SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+        };
+        picker.FileTypeFilter.Add("*");
+        var window = App.MainWindow ?? throw new InvalidOperationException("Cửa sổ chưa sẵn sàng.");
+        WinRT.Interop.InitializeWithWindow.Initialize(picker,
+            WinRT.Interop.WindowNative.GetWindowHandle(window));
+        var folder = await picker.PickSingleFolderAsync();
+        return folder?.Path;
+    }
+
+    private async void ExportClick(object sender, RoutedEventArgs args)
+    {
+        if (offline is null || currentNote is not { } note || note.Locked) return;
+        await RunDialog(async () =>
+        {
+            var format = new ComboBox
+            {
+                Header = "Định dạng",
+                ItemsSource = new[] { "Markdown", "HTML", "PDF" },
+                SelectedIndex = 0,
+            };
+            if (await Dialog("Xuất ghi chú", format, "Xuất").ShowAsync() != ContentDialogResult.Primary)
+                return;
+            var dir = await PickFolderAsync();
+            if (dir is null) return;
+            var fmt = ((string)format.SelectedItem).ToLowerInvariant();
+            var path = offline.Call<string>(new { type = "export_note", id = note.Id, format = fmt, dir });
+            Report($"Đã xuất: {path}");
+        });
+    }
+
+    private async void ImportClick(object sender, RoutedEventArgs args)
+    {
+        if (offline is null) return;
+        await RunDialog(async () =>
+        {
+            var format = new ComboBox
+            {
+                Header = "Nguồn",
+                ItemsSource = new[] { "Markdown folder", "Apple Notes (HTML)" },
+                SelectedIndex = 0,
+            };
+            if (await Dialog("Nhập ghi chú", format, "Nhập").ShowAsync() != ContentDialogResult.Primary)
+                return;
+            var dir = await PickFolderAsync();
+            if (dir is null) return;
+            var fmt = ((string)format.SelectedItem).StartsWith("Markdown") ? "markdown" : "apple_html";
+            var count = offline.Call<string[]>(new { type = "import_folder", path = dir, parent = (string?)null, format = fmt });
+            GlobalSearch.Text = "";
+            RefreshFolders("all");
+            RefreshNotes();
+            RefreshTags();
+            Report($"Đã nhập {count.Length} ghi chú.");
+        });
+    }
+
+    // ---- Locked Notes (M4-W.2) ----
+
+    internal bool IsLockedSession => currentNote is not null && lockedSessionNoteId == currentNote.Id;
+
+    private void ShowLockScreen(NoteItem note)
+    {
+        ShowSnapshot(new EditorSnapshot(0, []));
+        EditorScroll.Visibility = Visibility.Collapsed;
+        LockScreen.Visibility = Visibility.Visible;
+        LockTitle.Text = note.DisplayTitle;
+        LockPassphrase.Password = "";
+        LockPassphrase.IsEnabled = true;
+        UnlockButton.IsEnabled = true;
+        RelockButton.Visibility = Visibility.Collapsed;
+        LockHint.Visibility = Visibility.Collapsed;
+        LockHint.Text = "";
+        try
+        {
+            if (offline!.Call<string?>(new { type = "lock_hint", id = note.Id }) is { Length: > 0 } hint)
+            {
+                LockHint.Text = $"Gợi ý: {hint}";
+                LockHint.Visibility = Visibility.Visible;
+            }
+        }
+        catch (Exception) { /* gợi ý chỉ mang tính phụ trợ */ }
+        _ = ShowHelloUnlockAsync();
+        Report("Ghi chú đang khóa.");
+    }
+
+    private void HideLockScreen()
+    {
+        LockScreen.Visibility = Visibility.Collapsed;
+        EditorScroll.Visibility = Visibility.Visible;
+        LockPassphrase.Password = "";
+        RelockButton.Visibility = Visibility.Collapsed;
+    }
+
+    private async Task ShowHelloUnlockAsync()
+    {
+        HelloUnlockButton.Visibility = Visibility.Collapsed;
+        if (dataRoot is null) return;
+        var remembered = await HelloUnlockStore.LoadAsync(dataRoot);
+        if (remembered is not null && await HelloUnlock.IsAvailableAsync())
+            HelloUnlockButton.Visibility = Visibility.Visible;
+    }
+
+    private async void LockClick(object sender, RoutedEventArgs args)
+    {
+        if (offline is null || currentNote is not { Deleted: false, Locked: false } note || !TryCloseEditor()) return;
+        if (!lockSupported)
+        {
+            Report("Kho dữ liệu chưa hỗ trợ khóa ghi chú (cần SQLCipher).");
+            return;
+        }
+        await RunDialog(async () =>
+        {
+            var passphrase = new PasswordBox { Header = "Mật khẩu khóa" };
+            var hint = new TextBox { Header = "Gợi ý (không bắt buộc)", MaxLength = 160 };
+            var hello = new CheckBox { Content = "Cho phép mở nhanh bằng Windows Hello",
+                IsEnabled = await HelloUnlock.IsAvailableAsync() };
+            var panel = new StackPanel { Spacing = 12 };
+            panel.Children.Add(passphrase);
+            panel.Children.Add(hint);
+            panel.Children.Add(hello);
+            var dialog = Dialog("Khóa ghi chú", panel, "Khóa");
+            passphrase.PasswordChanged += (_, _) =>
+                dialog.IsPrimaryButtonEnabled = passphrase.Password.Length > 0;
+            dialog.IsPrimaryButtonEnabled = false;
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            offline.Call(new { type = "lock_note", id = note.Id, passphrase = passphrase.Password,
+                hint = string.IsNullOrWhiteSpace(hint.Text) ? null : hint.Text.Trim() });
+            if (hello.IsChecked == true && await HelloUnlock.IsAvailableAsync())
+                await HelloUnlockStore.SaveAsync(dataRoot!, passphrase.Password);
+            else
+                await HelloUnlockStore.DeleteAsync(dataRoot!);
+            currentNote = GetNote(note.Id);
+            RefreshNotes();
+            SetCurrent(currentNote);
+            Report("Ghi chú đã được khóa.");
+        });
+    }
+
+    private async void UnlockClick(object sender, RoutedEventArgs args) =>
+        await UnlockWith(LockPassphrase.Password);
+
+    private async void HelloUnlockClick(object sender, RoutedEventArgs args)
+    {
+        if (dataRoot is null) return;
+        if (!await HelloUnlock.ConsentAsync("Mở khóa ghi chú trong Notes"))
+        {
+            Report("Windows Hello không xác nhận được. Hãy dùng mật khẩu khóa.");
+            return;
+        }
+        var passphrase = await HelloUnlockStore.LoadAsync(dataRoot);
+        if (passphrase is null)
+        {
+            Report("Không đọc được mật khẩu đã nhớ cho Windows Hello.");
+            return;
+        }
+        await UnlockWith(passphrase);
+    }
+
+    private async Task UnlockWith(string passphrase)
+    {
+        if (offline is null || currentNote is not { } note) return;
+        if (passphrase.Length == 0)
+        {
+            Report("Nhập mật khẩu khóa.");
+            return;
+        }
+        try
+        {
+            var snapshot = offline.Call<EditorSnapshot>(new { type = "unlock_note", id = note.Id, passphrase });
+            HideLockScreen();
+            ShowSnapshot(snapshot);
+            lockedSessionNoteId = note.Id;
+            RelockButton.Visibility = Visibility.Visible;
+            Report("Ghi chú đã mở khóa cho phiên này.");
+            ResetAutoLock();
+        }
+        catch (WrongPassphraseException error) { Report(error.Message); }
+        catch (InvalidOperationException error) { Report(error.Message); }
+        await Task.CompletedTask;
+    }
+
+    private void LockPassphraseKeyDown(object sender, KeyRoutedEventArgs args)
+    {
+        if (args.Key == VirtualKey.Enter)
+        {
+            args.Handled = true;
+            Run(() => _ = UnlockWith(LockPassphrase.Password));
+        }
+    }
+
+    private void RelockClick(object sender, RoutedEventArgs args) => Run(LockAllLocked);
+
+    /// Khóa lại mọi phiên mở: bỏ NLK và plaintext khỏi bộ nhớ của core.
+    internal void LockAllLocked()
+    {
+        if (offline is null || lockedSessionNoteId is null) return;
+        var id = lockedSessionNoteId;
+        offline.Call(new { type = "relock_note", id });
+        lockedSessionNoteId = null;
+        RefreshNotes();
+        currentNote = GetNote(id);
+        SetCurrent(currentNote);
+        Report("Đã khóa lại ghi chú.");
+    }
+
+    private void SetupAutoLock()
+    {
+        autoLockTimer ??= DispatcherQueue.CreateTimer();
+        autoLockTimer.Interval = TimeSpan.FromMinutes(AutoLockMinutes);
+        autoLockTimer.IsRepeating = false;
+        autoLockTimer.Tick += (_, _) => DispatcherQueue.TryEnqueue(LockAllLocked);
+        ResetAutoLock();
+        // Ngủ máy (WM_POWERBROADCAST PBT_APMSUSPEND) và khóa phiên (WTS_SESSION_LOCK)
+        // đều đến từ SessionLockMonitor để tránh phụ thuộc PowerManager của WinAppSDK.
+        SessionLockMonitor.Start(() => DispatcherQueue.TryEnqueue(LockAllLocked));
+    }
+
+    internal void ResetAutoLock()
+    {
+        if (!IsLockedSession) return;
+        autoLockTimer?.Stop();
+        autoLockTimer?.Start();
+    }
+
     private FrameworkElement CreateEmbed(Block block)
     {
         var row = new StackPanel { Spacing = 6, Orientation = Orientation.Horizontal };
@@ -659,6 +1052,20 @@ public sealed partial class MainPage
             };
             link.Click += (_, _) => Run(() => OpenLinkedNote(block.NoteId!));
             row.Children.Add(link);
+        }
+        else if (IsLockedSession)
+        {
+            var image = new Image { MaxHeight = 260, MaxWidth = 480, Stretch = Stretch.Uniform };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(image, "Ảnh đính kèm");
+            var message = new TextBlock { Text = "Đang tải ảnh…" };
+            row.Children.Add(image);
+            row.Children.Add(message);
+            try
+            {
+                var bytes = offline!.Call<ImageDataDto>(new { type = "image_data", id = block.AttachmentId });
+                _ = LoadImageBytes(image, message, bytes.Data);
+            }
+            catch (Exception error) { message.Text = error.Message; }
         }
         else
         {
@@ -685,6 +1092,27 @@ public sealed partial class MainPage
             row.Children.Add(remove);
         }
         return row;
+    }
+
+    private static async Task LoadImageBytes(Image image, TextBlock message, string base64)
+    {
+        try
+        {
+            var bytes = Convert.FromBase64String(base64);
+            using var stream = new InMemoryRandomAccessStream();
+            using (var writer = new DataWriter(stream))
+            {
+                writer.WriteBytes(bytes);
+                await writer.StoreAsync();
+                writer.DetachStream();
+            }
+            stream.Seek(0);
+            var bitmap = new BitmapImage { DecodePixelWidth = 960 };
+            await bitmap.SetSourceAsync(stream);
+            image.Source = bitmap;
+            message.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception) { message.Text = "Không đọc được ảnh đính kèm."; }
     }
 
     private static async Task LoadImage(Image image, TextBlock message, string path)

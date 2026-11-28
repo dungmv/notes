@@ -29,6 +29,26 @@ enum Request {
     },
     CreateFolder {
         name: String,
+        #[serde(default)]
+        parent: Option<String>,
+    },
+    CreateSmartFolder {
+        name: String,
+        query: String,
+    },
+    SmartFolderNotes {
+        id: String,
+    },
+    TagsList,
+    ExportNote {
+        id: String,
+        format: String,
+        dir: String,
+    },
+    ImportFolder {
+        path: String,
+        parent: Option<String>,
+        format: String,
     },
     RenameFolder {
         id: String,
@@ -80,6 +100,35 @@ enum Request {
         png: String,
     },
     ImagePath {
+        id: String,
+    },
+    LockStatus,
+    LockHint {
+        id: String,
+    },
+    LockNote {
+        id: String,
+        passphrase: String,
+        hint: Option<String>,
+    },
+    UnlockNote {
+        id: String,
+        passphrase: String,
+    },
+    RelockNote {
+        id: String,
+    },
+    LockChangePassword {
+        id: String,
+        current: String,
+        new: String,
+        hint: Option<String>,
+    },
+    LockRemoveProtection {
+        id: String,
+        passphrase: String,
+    },
+    ImageData {
         id: String,
     },
     SyncStatus,
@@ -134,7 +183,35 @@ impl OfflineSession {
                 store.set_checklist_sort(enabled)?;
                 Ok(Value::Null)
             }
-            Request::CreateFolder { name } => to_value(store.create_folder(&name)?),
+            Request::CreateFolder { name, parent } => {
+                to_value(store.create_folder(&name, parent.as_deref())?)
+            }
+            Request::CreateSmartFolder { name, query } => {
+                to_value(store.create_smart_folder(&name, &query)?)
+            }
+            Request::SmartFolderNotes { id } => to_value(store.smart_folder_notes(&id)?),
+            Request::TagsList => to_value(store.tags()?),
+            Request::ExportNote { id, format, dir } => {
+                let path = match format.as_str() {
+                    "markdown" => store.export_markdown(&id, Path::new(&dir))?,
+                    "html" => store.export_html(&id, Path::new(&dir))?,
+                    "pdf" => store.export_pdf(&id, Path::new(&dir))?,
+                    _ => return Err(OfflineError::Invalid.into()),
+                };
+                to_value(path.to_string_lossy())
+            }
+            Request::ImportFolder { path, parent, format } => {
+                let ids = match format.as_str() {
+                    "markdown" => {
+                        notes_app::transfer::import_markdown_folder(store, Path::new(&path), parent.as_deref())?
+                    }
+                    "apple_html" => {
+                        notes_app::transfer::import_apple_notes_html(store, Path::new(&path), parent.as_deref())?
+                    }
+                    _ => return Err(OfflineError::Invalid.into()),
+                };
+                to_value(ids)
+            }
             Request::RenameFolder { id, name } => {
                 store.rename_folder(&id, &name)?;
                 Ok(Value::Null)
@@ -187,6 +264,48 @@ impl OfflineSession {
                 )?)
             }
             Request::ImagePath { id } => to_value(store.image_path(active(&mut self.note)?, &id)?),
+            Request::LockStatus => to_value(lock_status(self)?),
+            Request::LockHint { id } => to_value(store.lock_hint(&id)?),
+            Request::LockNote { id, passphrase, hint } => {
+                store.lock_note(&id, &passphrase, hint)?;
+                Ok(Value::Null)
+            }
+            Request::UnlockNote { id, passphrase } => {
+                let editor = store.unlock_note(&id, &passphrase)?;
+                let result = to_value(editor.snapshot())?;
+                self.note = Some(editor);
+                Ok(result)
+            }
+            Request::RelockNote { id } => {
+                if let Some(note) = &self.note
+                    && note.id() == &id
+                    && note.is_locked()
+                {
+                    self.note = None;
+                }
+                Ok(Value::Null)
+            }
+            Request::LockChangePassword { id, current, new, hint } => {
+                store.change_lock_password(&id, &current, &new, hint)?;
+                Ok(Value::Null)
+            }
+            Request::LockRemoveProtection { id, passphrase } => {
+                store.remove_protection(&id, &passphrase)?;
+                if let Some(note) = &self.note
+                    && note.id() == &id
+                {
+                    self.note = None;
+                }
+                Ok(Value::Null)
+            }
+            Request::ImageData { id } => {
+                let note = active(&mut self.note)?;
+                let bytes = store.image_bytes(note, &id)?;
+                to_value(json!({
+                    "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+                    "mime_type": "image/png",
+                }))
+            }
             Request::SyncStatus => to_value(sync.status(store)?),
             Request::SyncUnlock {
                 amk_b64,
@@ -268,6 +387,46 @@ fn active(note: &mut Option<NoteEditor>) -> Result<&mut NoteEditor, OfflineError
     note.as_mut().ok_or(OfflineError::Missing)
 }
 
+fn lock_status(session: &OfflineSession) -> Result<Value, OfflineError> {
+    let supported = session.store.lock_support();
+    let locked_note_ids = if supported {
+        session.store.locked_note_ids()?
+    } else {
+        Vec::new()
+    };
+    Ok(json!({
+        "supported": supported,
+        "locked_note_ids": locked_note_ids,
+        "open_note_locked": session
+            .note
+            .as_ref()
+            .is_some_and(|note| note.is_locked()),
+    }))
+}
+
+/// `db_key` là khóa DB cục bộ dạng hex 64 ký tự do client sinh và lưu trong
+/// OS secure storage; null hoặc rỗng mở kho dạng rõ (hành vi cũ).
+fn parse_db_key(db_key: *const c_char) -> Result<Option<[u8; 32]>, OfflineError> {
+    if db_key.is_null() {
+        return Ok(None);
+    }
+    let text = unsafe { CStr::from_ptr(db_key) }
+        .to_str()
+        .map_err(|_| OfflineError::InvalidDbKey)?;
+    if text.is_empty() {
+        return Ok(None);
+    }
+    if text.len() != 64 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(OfflineError::InvalidDbKey);
+    }
+    let mut key = [0u8; 32];
+    for (index, byte) in key.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&text[index * 2..index * 2 + 2], 16)
+            .map_err(|_| OfflineError::InvalidDbKey)?;
+    }
+    Ok(Some(key))
+}
+
 fn reply(result: Reply) -> *mut c_char {
     let value = match result {
         Ok(value) => json!({ "value": value }),
@@ -278,6 +437,36 @@ fn reply(result: Reply) -> *mut c_char {
                 Some(OfflineError::Editor(EditorError::HistoryConflict))
             ) {
                 json!({ "error": message, "code": "history_conflict" })
+            } else if matches!(
+                error.downcast_ref::<OfflineError>(),
+                Some(OfflineError::NoteLocked)
+            ) {
+                json!({ "error": message, "code": "note_locked" })
+            } else if matches!(
+                error.downcast_ref::<OfflineError>(),
+                Some(OfflineError::WrongPassphrase)
+            ) {
+                json!({ "error": message, "code": "wrong_passphrase" })
+            } else if matches!(
+                error.downcast_ref::<OfflineError>(),
+                Some(OfflineError::InvalidDbKey)
+            ) {
+                json!({ "error": message, "code": "invalid_db_key" })
+            } else if matches!(
+                error.downcast_ref::<OfflineError>(),
+                Some(OfflineError::LockUnsupported)
+            ) {
+                json!({ "error": message, "code": "lock_unsupported" })
+            } else if matches!(
+                error.downcast_ref::<OfflineError>(),
+                Some(OfflineError::SyncStillEnabled)
+            ) {
+                json!({ "error": message, "code": "lock_sync_enabled" })
+            } else if matches!(
+                error.downcast_ref::<SyncError>(),
+                Some(SyncError::LockedNotesPresent)
+            ) {
+                json!({ "error": message, "code": "sync_locked_notes" })
             } else if matches!(
                 error.downcast_ref::<SyncError>(),
                 Some(
@@ -302,10 +491,12 @@ fn reply(result: Reply) -> *mut c_char {
 }
 
 /// # Safety
-/// Path must be a readable UTF-8 C string. Output must accept a session pointer.
+/// Path and `db_key` must be readable UTF-8 C strings; `db_key` may be null
+/// to open a plaintext store. Output must accept a session pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn notes_offline_open(
     path: *const c_char,
+    db_key: *const c_char,
     output: *mut *mut OfflineSession,
 ) -> *mut c_char {
     reply((|| {
@@ -314,7 +505,8 @@ pub unsafe extern "C" fn notes_offline_open(
         }
         unsafe { output.write(ptr::null_mut()) };
         let path = unsafe { CStr::from_ptr(path) }.to_str()?;
-        let store = Store::open(Path::new(path))?;
+        let db_key = parse_db_key(db_key)?;
+        let store = Store::open_with_key(Path::new(path), db_key.as_ref())?;
         let session = Box::new(OfflineSession {
             store,
             note: None,

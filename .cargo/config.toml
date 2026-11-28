@@ -1,0 +1,5 @@
+# SQLCipher pulls openssl-src which builds OpenSSL from source. The bundled
+# assembler step needs NASM, which is not installed on the Windows dev boxes,
+# so OpenSSL is configured without hand-written assembly instead.
+[env]
+OPENSSL_NO_ASM = "1"

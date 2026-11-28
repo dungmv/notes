@@ -86,6 +86,8 @@ key_newtype!(DataEncryptionKey);
 key_newtype!(BlobIndexKey);
 key_newtype!(BlobEncryptionKey);
 key_newtype!(RecoveryKek);
+key_newtype!(NoteLockKey);
+key_newtype!(ImageBlobKey);
 
 pub fn random_salt32() -> [u8; 32] {
     let mut salt = [0u8; 32];

@@ -182,7 +182,7 @@ public sealed partial class MainPage
     {
         for (var attempt = 0; attempt < 8; attempt++)
         {
-            using var session = OfflineSession.Open(root);
+            using var session = OfflineSession.Open(root, LocalDbKeyStore.LoadOrCreate(root));
             var snapshot = session.Call<EditorSnapshot>(new { type = "open_note", id = FixtureNote });
             var tail = snapshot.Blocks.Single(block => block.Id == "link-custom-tail");
             var text = tail.Content!.Text;
@@ -204,7 +204,8 @@ public sealed partial class MainPage
         SetCurrent(null);
         SetCurrent(GetNote(FixtureNote));
         using var expected = JsonDocument.Parse(File.ReadAllText(expectedPath));
-        using var reader = OfflineSession.Open(Path.GetDirectoryName(expectedPath)!);
+        using var reader = OfflineSession.Open(Path.GetDirectoryName(expectedPath)!,
+            await LocalDbKeyStore.LoadOrCreateAsync(Path.GetDirectoryName(expectedPath)!));
         var snapshot = reader.Call<JsonElement>(new { type = "open_note", id = FixtureNote });
         Require(JsonElement.DeepEquals(snapshot, expected.RootElement), "Persisted snapshot matches checkpoint");
         var images = snapshot.GetProperty("blocks").EnumerateArray()
@@ -229,7 +230,7 @@ public sealed partial class MainPage
 
     private void WriteCheckpoint(string root, string path)
     {
-        using var reader = OfflineSession.Open(root);
+        using var reader = OfflineSession.Open(root, LocalDbKeyStore.LoadOrCreate(root));
         var snapshot = reader.Call<JsonElement>(new { type = "open_note", id = FixtureNote });
         Require(snapshot.GetProperty("revision").GetUInt64() == revision, "Durable revision equals UI ACK");
         var temporary = path + ".tmp";

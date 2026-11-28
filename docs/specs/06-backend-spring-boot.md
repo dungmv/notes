@@ -164,3 +164,8 @@ Phase 3 giữ log append-only. Trước khi hỗ trợ compaction, đặc tả c
   - Enforce TLS 1.3 ở reverse proxy (Nginx / Caddy / Traefik).
   - Rate limiting theo `user_id` / IP (Bucket4j).
   - Zero-knowledge: Server không bao giờ nắm giữ Master Sync Key hay Note Lock Key của người dùng.
+- **Sao lưu và khôi phục** (runbook kiểm chứng 2026-11-28 theo M4-W.7):
+  - PostgreSQL: `docker exec backend-postgres-1 sh -c "pg_dump -U notes -d notes -Fc -f /tmp/notes.dump"` rồi `docker cp` ra ngoài. Khôi phục kiểm chứng: `createdb` một DB thử + `pg_restore` + đối chiếu số dòng `users`/`sync_deltas`/`devices` với DB gốc trước khi thay DB chính. Khôi phục môi trường sạch: dựng container PostgreSQL mới với volume trống, chạy restore trước khi khởi động backend.
+  - Object storage: chép toàn bộ volume data (`docker cp backend-minio-1:/data ./backup/minio-data` với rustfs/MinIO). Khôi phục: dựng container với volume trống, chép ngược dữ liệu trước khi backend khởi động (complete-upload yêu cầu bucket đã tồn tại).
+  - Thứ tự: PostgreSQL và object storage đều sẵn sàng **trước** khi bật backend. Client kết nối lại sau phục hồi tiếp tục pull từ cursor đã lưu; delta trùng gửi lại được khử nhờ `client_op_id` và blob thiếu được upload lại.
+  - Drill đã chạy: dump 40KB; sau restore khớp users=3, sync_deltas=13, devices=7; bucket `notes-blobs` còn nguyên 8 object metadata.

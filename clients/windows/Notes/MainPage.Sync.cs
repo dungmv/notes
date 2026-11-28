@@ -22,7 +22,8 @@ public sealed partial class MainPage
     {
         try
         {
-            syncWorker = await Task.Run(() => OfflineSession.Open(root));
+            syncWorker = await Task.Run(async () =>
+                OfflineSession.Open(root, await LocalDbKeyStore.LoadOrCreateAsync(root)));
             var secrets = await SecureKeyStore.LoadAsync(root);
             if (secrets is not null)
             {
@@ -782,7 +783,8 @@ public sealed partial class MainPage
 
             // 4. Simulate second device editing the same note over HTTP and pull into live RichEditBox
             var secondDir = Path.Combine(root, "device2");
-            using (var dev2 = await Task.Run(() => OfflineSession.Open(secondDir)))
+            using (var dev2 = await Task.Run(async () =>
+                OfflineSession.Open(secondDir, await LocalDbKeyStore.LoadOrCreateAsync(secondDir))))
             {
                 dev2.Call<AuthSuccessDto>(new
                 {

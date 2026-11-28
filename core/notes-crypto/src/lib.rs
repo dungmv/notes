@@ -1,5 +1,6 @@
 pub mod envelope;
 pub mod keys;
+pub mod notelock;
 pub mod recovery;
 pub mod stream;
 
@@ -9,8 +10,8 @@ pub use envelope::{
 };
 pub use keys::{
     AccountMasterKey, AuthKey, BlobEncryptionKey, BlobIndexKey, DataEncryptionKey,
-    EntityWrapKey, KdfParams, KeyEncryptionKey, MasterSecret, RecoveryKek, SecretKey32,
-    derive_master_secret, random_key32, random_salt32,
+    EntityWrapKey, ImageBlobKey, KdfParams, KeyEncryptionKey, MasterSecret, NoteLockKey,
+    RecoveryKek, SecretKey32, derive_master_secret, random_key32, random_salt32,
 };
 pub use recovery::{decode_recovery_key, encode_recovery_key};
 pub use stream::{

@@ -161,3 +161,130 @@ fn undo_redo_structural_edit_keeps_shifted_anchor() {
         ]
     );
 }
+
+fn table_document() -> String {
+    let cell = |text: &str| serde_json::json!({"text": text, "marks": []}).to_string();
+    format!(
+        r#"{{"version":1,"revision":0,"blocks":[{{"id":"tbl","kind":"table",
+        "rows":[[{c00},{c01}],[{c10},{c11}]]}}]}}"#,
+        c00 = cell("Một"),
+        c01 = cell("Hai"),
+        c10 = cell("Ba"),
+        c11 = cell("Bốn"),
+    )
+}
+
+fn table_op(operation: serde_json::Value) -> Operation {
+    serde_json::from_value(operation).unwrap()
+}
+
+fn table_rows(editor: &Editor) -> Vec<Vec<RichText>> {
+    match &editor.snapshot().blocks[0].kind {
+        BlockKind::Table { rows } => rows.clone(),
+        _ => panic!("block is not a table"),
+    }
+}
+
+#[test]
+fn table_structure_operations_keep_cells_and_history() {
+    let mut editor = Editor::open(&table_document()).unwrap();
+    apply(&mut editor, vec![table_op(serde_json::json!({
+        "type": "table_insert_row", "id": "tbl", "after_row": 0 }))], false).unwrap();
+    apply(&mut editor, vec![table_op(serde_json::json!({
+        "type": "table_insert_column", "id": "tbl", "after_column": null }))], false).unwrap();
+    let rows = table_rows(&editor);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].len(), 3);
+
+    // Sửa ô sau khi đổi cấu trúc: khóa vị trí phải khớp CRDT.
+    apply(&mut editor, vec![Operation::Replace {
+        id: "tbl".into(),
+        cell: Some(Cell { row: 2, column: 1 }),
+        start: 0,
+        end: 3,
+        text: "Sửa 😀".into(),
+    }], false).unwrap();
+    assert_eq!(table_rows(&editor)[2][1].text, "Sửa 😀");
+
+    apply(&mut editor, vec![table_op(serde_json::json!({
+        "type": "table_move_row", "id": "tbl", "from": 0, "to": 2 }))], false).unwrap();
+    assert_eq!(table_rows(&editor)[2][0].text, "Một");
+    apply(&mut editor, vec![table_op(serde_json::json!({
+        "type": "table_move_column", "id": "tbl", "from": 1, "to": 0 }))], false).unwrap();
+    assert_eq!(table_rows(&editor)[2][0].text, "Hai");
+
+    apply(&mut editor, vec![table_op(serde_json::json!({
+        "type": "table_remove_row", "id": "tbl", "row": 0 }))], false).unwrap();
+    apply(&mut editor, vec![table_op(serde_json::json!({
+        "type": "table_remove_column", "id": "tbl", "column": 1 }))], false).unwrap();
+    let rows = table_rows(&editor);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1][0].text, "Hai");
+    assert_eq!(rows[0][0].text, "Sửa 😀");
+
+    // Undo toàn bộ chuỗi cấu trúc (7 op) rồi redo: nội dung ô quay về đúng.
+    for _ in 0..7 {
+        editor.history(editor.snapshot().revision, false).unwrap();
+    }
+    let rows = table_rows(&editor);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0][0].text, "Một");
+    assert_eq!(rows[1][1].text, "Bốn");
+    for _ in 0..7 {
+        editor.history(editor.snapshot().revision, true).unwrap();
+    }
+    let rows = table_rows(&editor);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0][0].text, "Sửa 😀");
+    assert_eq!(rows[1][0].text, "Hai");
+}
+
+#[test]
+fn row_insert_realigned_positional_keys_for_second_editor() {
+    let mut first = Editor::open(&table_document()).unwrap();
+    let mut second = Editor::from_state(&first.crdt_state()).unwrap();
+    apply(&mut first, vec![table_op(serde_json::json!({
+        "type": "table_insert_row", "id": "tbl", "after_row": null }))], false).unwrap();
+    apply(&mut second, vec![Operation::Replace {
+        id: "tbl".into(),
+        cell: Some(Cell { row: 1, column: 1 }),
+        start: 0,
+        end: 0,
+        text: "Từ thiết bị khác".into(),
+    }], false).unwrap();
+
+    // Trạng thái của máy một (đã chèn hàng) dựng lại phải giữ nội dung ô cũ
+    // và cho máy hai sửa tiếp đúng vị trí mới.
+    let merged = Editor::from_state(&first.crdt_state()).unwrap();
+    let rows = table_rows(&merged);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0][1].text, "Hai");
+    assert_eq!(rows[1][1].text, "Bốn");
+    let _ = second;
+}
+
+#[test]
+fn insert_at_creates_table_and_keeps_cell_content() {
+    let mut editor = Editor::open(FIXTURE).unwrap();
+    let revision = editor.snapshot().revision;
+    let paragraph = editor.snapshot().blocks[0].id.clone();
+    let table = serde_json::json!({
+        "id": "new-table", "kind": "table",
+        "rows": [[{"text":"A","marks":[]},{"text":"B","marks":[]}]]
+    });
+    let update = apply(&mut editor, vec![table_op(serde_json::json!({
+        "type": "insert_at", "id": paragraph, "start": 0, "end": 0,
+        "block": table, "tail_id": "tail-1" }))], false).unwrap();
+    assert_eq!(update.revision, revision + 1);
+    let kinds: Vec<&str> = editor.snapshot().blocks.iter()
+        .map(|block| match &block.kind {
+            BlockKind::Table { .. } => "table",
+            _ => "other",
+        }).collect();
+    assert!(kinds.contains(&"table"));
+    let state = Editor::from_state(&editor.crdt_state()).unwrap();
+    let block = state.snapshot().blocks.iter().find(|b| b.id == "new-table").unwrap();
+    let BlockKind::Table { rows } = &block.kind else { panic!("not a table") };
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0].text, "A");
+}

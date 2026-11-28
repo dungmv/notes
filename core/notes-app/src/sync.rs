@@ -33,6 +33,8 @@ pub enum SyncError {
     Transport(#[from] SyncTransportError),
     #[error("Đồng bộ chưa được kích hoạt hoặc chưa mở khóa")]
     NotAuthenticated,
+    #[error("Thư viện có ghi chú khóa, chưa thể bật đồng bộ (TD-003)")]
+    LockedNotesPresent,
     #[error("Dữ liệu đồng bộ không hợp lệ: {0}")]
     InvalidData(String),
 }
@@ -851,6 +853,20 @@ impl SyncClient {
                 row.get::<_, i64>(0).map(|v| v != 0)
             })
             .map_err(OfflineError::from)?;
+
+        // Locked Notes chưa đồng bộ được (TD-003): kho có ghi chú khóa phải
+        // giữ local-only cho đến khi hợp đồng sync khóa được chốt.
+        if !was_enabled {
+            let locked_notes: i64 = store
+                .db()
+                .query_row("SELECT COUNT(*) FROM notes WHERE is_locked = 1", [], |row| {
+                    row.get(0)
+                })
+                .map_err(OfflineError::from)?;
+            if locked_notes > 0 {
+                return Err(SyncError::LockedNotesPresent);
+            }
+        }
 
         let amk_b64 = B64.encode(amk.as_bytes());
         self.amk = Some(amk);

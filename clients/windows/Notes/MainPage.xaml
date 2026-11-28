@@ -21,9 +21,20 @@
                     <Button Content="+ Thư mục" Click="CreateFolderClick" />
                     <Button x:Name="RenameFolderButton" Content="Đổi tên" Click="RenameFolderClick" />
                 </StackPanel>
+                <Button Content="+ Smart Folder" Click="CreateSmartFolderClick" />
             </StackPanel>
-            <ListView x:Name="Folders" Grid.Row="1" AutomationProperties.Name="Thư mục"
-                      SelectionChanged="FolderChanged" />
+            <Grid Grid.Row="1" RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="160" />
+                </Grid.RowDefinitions>
+                <ListView x:Name="Folders" Grid.Row="0" AutomationProperties.Name="Thư mục"
+                          SelectionChanged="FolderChanged" />
+                <TextBlock Grid.Row="1" Text="Tags" Style="{StaticResource SubtitleTextBlockStyle}" />
+                <ListView x:Name="TagList" Grid.Row="2" AutomationProperties.Name="Tags"
+                          SelectionMode="Single" SelectionChanged="TagChanged" />
+            </Grid>
         </Grid>
         <Grid x:Name="NotePane" Grid.Column="1" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
               Padding="12" RowSpacing="12">
@@ -34,19 +45,43 @@
             <StackPanel Spacing="8">
                 <TextBox x:Name="GlobalSearch" PlaceholderText="Tìm tất cả ghi chú"
                          AutomationProperties.Name="Tìm tất cả ghi chú" TextChanged="SearchChanged" />
-                <Button x:Name="NewNoteButton" Content="+ Ghi chú" Click="CreateNoteClick" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Button x:Name="NewNoteButton" Content="+ Ghi chú" Click="CreateNoteClick" />
+                    <Button x:Name="ViewToggle" Content="Gallery" Click="ViewToggleClick" />
+                </StackPanel>
             </StackPanel>
             <ListView x:Name="NoteList" Grid.Row="1" AutomationProperties.Name="Ghi chú" SelectionChanged="NoteChanged">
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="local:NoteItem">
                         <StackPanel Padding="0,7" Spacing="3">
-                            <TextBlock Text="{x:Bind DisplayTitle}" TextTrimming="CharacterEllipsis"
-                                       Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE72E;" FontSize="12" Visibility="{x:Bind LockGlyph}" />
+                                <TextBlock Text="{x:Bind DisplayTitle}" TextTrimming="CharacterEllipsis"
+                                           Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            </StackPanel>
                             <TextBlock Text="{x:Bind Snippet}" Opacity=".72" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
+            <GridView x:Name="GalleryList" Grid.Row="1" AutomationProperties.Name="Ghi chú dạng thẻ"
+                      SelectionChanged="NoteChanged" Visibility="Collapsed" Padding="0">
+                <GridView.ItemTemplate>
+                    <DataTemplate x:DataType="local:NoteItem">
+                        <StackPanel Padding="10" Spacing="4" Width="220" Height="140"
+                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                    CornerRadius="6">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE72E;" FontSize="12" Visibility="{x:Bind LockGlyph}" />
+                                <TextBlock Text="{x:Bind DisplayTitle}" TextTrimming="CharacterEllipsis"
+                                           MaxLines="2" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            </StackPanel>
+                            <TextBlock Text="{x:Bind Snippet}" Opacity=".72" TextTrimming="CharacterEllipsis"
+                                       TextWrapping="Wrap" MaxLines="4" />
+                        </StackPanel>
+                    </DataTemplate>
+                </GridView.ItemTemplate>
+            </GridView>
         </Grid>
         <Grid Grid.Column="2" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" Padding="18" RowSpacing="12">
             <Grid.RowDefinitions>
@@ -63,6 +98,10 @@
                 <StackPanel x:Name="NoteActions" Orientation="Horizontal" Spacing="6">
                     <Button x:Name="MoveButton" Content="Di chuyển" Click="MoveClick" />
                     <Button x:Name="DeleteButton" Content="Xóa" Click="DeleteClick" />
+                    <Button x:Name="LockButton" Content="Khóa ghi chú" Click="LockClick" />
+                    <Button x:Name="RelockButton" Content="Khóa lại" Click="RelockClick" Visibility="Collapsed" />
+                    <Button Content="Xuất" Click="ExportClick" />
+                    <Button Content="Nhập" Click="ImportClick" />
                     <CheckBox x:Name="ChecklistSort" Content="Tự sắp checklist" Click="ChecklistSortClick" />
                     <Button x:Name="SyncNowButton" Content="Đồng bộ ngay" Click="SyncNowClick" />
                     <Button x:Name="SyncAccountButton" Content="Tài khoản" Click="SyncAccountClick" />
@@ -77,6 +116,15 @@
                         <Button Content="S" Tag="strikethrough" Click="FormatClick" AutomationProperties.Name="Gạch ngang" />
                         <Button Content="Kiểu đoạn" Click="StyleClick" />
                         <Button Content="Liên kết" Click="LinkClick" />
+                        <Button Content="Bảng" Click="InsertTableClick" AutomationProperties.Name="Chèn bảng" />
+                        <Button Content="+Hàng" Tag="table_insert_row" Click="TableOpClick" AutomationProperties.Name="Thêm hàng" />
+                        <Button Content="−Hàng" Tag="table_remove_row" Click="TableOpClick" AutomationProperties.Name="Xóa hàng" />
+                        <Button Content="+Cột" Tag="table_insert_column" Click="TableOpClick" AutomationProperties.Name="Thêm cột" />
+                        <Button Content="−Cột" Tag="table_remove_column" Click="TableOpClick" AutomationProperties.Name="Xóa cột" />
+                        <Button Content="⇧Hàng" Tag="table_move_row_up" Click="TableOpClick" AutomationProperties.Name="Đưa hàng lên" />
+                        <Button Content="⇩Hàng" Tag="table_move_row_down" Click="TableOpClick" AutomationProperties.Name="Đưa hàng xuống" />
+                        <Button Content="⇧Cột" Tag="table_move_column_left" Click="TableOpClick" AutomationProperties.Name="Chuyển cột trái" />
+                        <Button Content="⇩Cột" Tag="table_move_column_right" Click="TableOpClick" AutomationProperties.Name="Chuyển cột phải" />
                     </StackPanel>
                 </ScrollViewer>
                 <StackPanel x:Name="FindBar" Orientation="Horizontal" Spacing="6" Visibility="Collapsed">
@@ -99,10 +147,26 @@
                 <Button x:Name="RetryButton" Grid.Column="2" Content="Thử lưu lại"
                         Click="RetryClick" Visibility="Collapsed" />
             </Grid>
-            <ScrollViewer x:Name="EditorScroll" Grid.Row="2" HorizontalContentAlignment="Stretch"
-                          HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel x:Name="Blocks" Spacing="8" />
-            </ScrollViewer>
+            <Grid Grid.Row="2">
+                <ScrollViewer x:Name="EditorScroll" HorizontalContentAlignment="Stretch"
+                              HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="Blocks" Spacing="8" />
+                </ScrollViewer>
+                <StackPanel x:Name="LockScreen" Visibility="Collapsed" HorizontalAlignment="Center"
+                            VerticalAlignment="Center" Spacing="12" MaxWidth="360">
+                    <FontIcon Glyph="&#xE72E;" FontSize="32" HorizontalAlignment="Center" />
+                    <TextBlock x:Name="LockTitle" TextWrapping="Wrap" HorizontalAlignment="Center"
+                               Style="{StaticResource SubtitleTextBlockStyle}" TextAlignment="Center" />
+                    <TextBlock x:Name="LockHint" Opacity="0.75" TextWrapping="Wrap" HorizontalAlignment="Center"
+                               Visibility="Collapsed" />
+                    <PasswordBox x:Name="LockPassphrase" PlaceholderText="Mật khẩu khóa"
+                                 AutomationProperties.Name="Mật khẩu khóa ghi chú" KeyDown="LockPassphraseKeyDown" />
+                    <Button x:Name="UnlockButton" Content="Mở khóa" Click="UnlockClick"
+                            HorizontalAlignment="Stretch" />
+                    <Button x:Name="HelloUnlockButton" Content="Mở bằng Windows Hello" Click="HelloUnlockClick"
+                            HorizontalAlignment="Stretch" Visibility="Collapsed" />
+                </StackPanel>
+            </Grid>
         </Grid>
     </Grid>
 </Page>

@@ -16,7 +16,9 @@ public sealed partial class MainPage
         var passed = new List<string>();
         try
         {
+            Trace(root, "start");
             var folder = offline!.Call<string>(new { type = "create_folder", name = "Công việc" });
+            Trace(root, "folder-created");
             RefreshFolders(folder);
             CreateNote();
             var target = currentNote ?? throw new InvalidOperationException("CreateNote did not open an editor.");
@@ -38,6 +40,7 @@ public sealed partial class MainPage
             History(true);
             Require(field.Content.Marks.Single().Style == "bold", "Native redo");
             passed.Add("WinUI edit, ACK, Unicode search, rich text, undo and redo");
+            Trace(root, "step1-text");
 
             var expected = revision;
             var attempts = 0;
@@ -56,6 +59,7 @@ public sealed partial class MainPage
             Require(pending is null && revision == expected + 1 && !field.Control.IsReadOnly &&
                 GetNote(target.Id).Title == title + "!", "Retry the pending write on its original note once");
             passed.Add("WinUI pending state, navigation guard and retry after an injected error");
+            Trace(root, "step2-retry");
 
             CreateNote();
             var source = currentNote ?? throw new InvalidOperationException("Source note missing.");
@@ -73,6 +77,7 @@ public sealed partial class MainPage
             Require(LinkLabels().SequenceEqual(new[] { "Đích đã đổi tên", "Nhãn riêng" }),
                 "Refresh the title label while retaining the custom label");
             passed.Add("Link insertion, navigation, rename, move and both label modes");
+            Trace(root, "step3-links");
 
             CreateNote();
             var checklist = currentNote ?? throw new InvalidOperationException("Checklist note missing.");
@@ -91,20 +96,27 @@ public sealed partial class MainPage
             Apply(new { type = "toggle", id = firstId });
             Require(Blocks.Children[0] == views[firstId].Root, "Unchecked checklist item returns to its group");
             passed.Add("Checklist conversion, split, indent, sort and toggle");
+            Trace(root, "step4-checklist");
 
             CreateNote();
             var photo = currentNote ?? throw new InvalidOperationException("Photo note missing.");
             field = views[blockOrder[0]].Fields[0];
             await EnterAcceptanceText(field, "Tiếng Việt 😀");
             field.Control.Document.Selection.SetRange(5, 5);
+            Trace(root, "img-before-storagefile");
             var fixture = await StorageFile.GetFileFromPathAsync(Path.Combine(AppContext.BaseDirectory, "M1", "pixel.png"));
+            Trace(root, "img-after-storagefile");
             var clipboard = new DataPackage();
             clipboard.SetBitmap(RandomAccessStreamReference.CreateFromFile(fixture));
+            Trace(root, "img-before-clipboard");
             await InsertClipboardImage(field, clipboard.GetView());
+            Trace(root, "img-after-clipboard");
             Require(blockOrder.Count == 3, "Insert bitmap between two text blocks");
             SetCurrent(null);
             offline.Dispose();
-            offline = OfflineSession.Open(root);
+            Trace(root, "img-before-reopen");
+            offline = OfflineSession.Open(root, LocalDbKeyStore.LoadOrCreate(root));
+            Trace(root, "img-after-reopen");
             RefreshFolders("all");
             SetCurrent(GetNote(photo.Id));
             var image = ((Panel)views[blockOrder[1]].Root).Children.OfType<Image>().Single();
@@ -116,6 +128,7 @@ public sealed partial class MainPage
                 views["acceptance-tail"].Root.Margin.Left > 0 &&
                 offline.Call<bool>(new { type = "checklist_sort" }), "Reload persisted checklist items and setting");
             passed.Add("Bitmap DataPackage, PNG encoding, caret position, blob rendering and reopen");
+            Trace(root, "step5-image");
 
             SetCurrent(GetNote(target.Id));
             DeleteClick(DeleteButton, new RoutedEventArgs());
@@ -126,6 +139,7 @@ public sealed partial class MainPage
             Require(GetNote(target.Id).Deleted == false && GetNote(target.Id).FolderId == "inbox",
                 "Restore note to previous folder");
             passed.Add("Soft deletion and restoration on the same stable ID");
+            Trace(root, "step6-trash");
 
             WriteAcceptanceResult(root, passed, null);
         }
@@ -162,8 +176,18 @@ public sealed partial class MainPage
         if (!condition) throw new InvalidOperationException(expectation);
     }
 
-    private static void WriteAcceptanceResult(string root, List<string> passed, string? error) =>
+    private static void WriteAcceptanceResult(string root, List<string> passed, string? error)
+    {
+        Trace(root, $"result error={error ?? "none"} passed={passed.Count}");
         File.WriteAllText(Path.Combine(root, "winui-acceptance.json"),
             JsonSerializer.Serialize(new { passed, error }, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private static void Trace(string root, string message)
+    {
+        try { File.AppendAllText(Path.Combine(root, "verify-trace.log"),
+            $"{DateTime.Now:HH:mm:ss.fff} {message}\n"); }
+        catch { }
+    }
 }
 #endif

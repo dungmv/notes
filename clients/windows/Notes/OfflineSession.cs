@@ -17,9 +17,9 @@ internal sealed partial class OfflineSession : SafeHandleZeroOrMinusOneIsInvalid
 
     private OfflineSession(IntPtr native) : base(ownsHandle: true) => SetHandle(native);
 
-    internal static OfflineSession Open(string directory)
+    internal static OfflineSession Open(string directory, string? dbKeyHex)
     {
-        ReadReply(notes_offline_open(directory, out var native));
+        ReadReply(notes_offline_open(directory, dbKeyHex, out var native));
         return new OfflineSession(native);
     }
 
@@ -48,6 +48,13 @@ internal sealed partial class OfflineSession : SafeHandleZeroOrMinusOneIsInvalid
                     throw new SyncUnauthorizedException(reply.RootElement.GetProperty("error").GetString() ?? "Phiên đồng bộ hết hạn.");
                 if (codeStr == "sync_network")
                     throw new SyncNetworkException(reply.RootElement.GetProperty("error").GetString() ?? "Chờ mạng.");
+                if (codeStr == "note_locked") throw new NoteLockedException();
+                if (codeStr == "wrong_passphrase")
+                    throw new WrongPassphraseException(reply.RootElement.GetProperty("error").GetString() ?? "Mật khẩu khóa không đúng.");
+                if (codeStr == "lock_unsupported")
+                    throw new LockUnsupportedException(reply.RootElement.GetProperty("error").GetString() ?? "Kho dữ liệu chưa mã hóa.");
+                if (codeStr == "lock_sync_enabled")
+                    throw new SyncStillEnabledException(reply.RootElement.GetProperty("error").GetString() ?? "Không thể khóa ghi chú khi đồng bộ đang bật.");
             }
             if (reply.RootElement.TryGetProperty("error", out var error))
                 throw new InvalidOperationException(error.GetString());
@@ -64,7 +71,7 @@ internal sealed partial class OfflineSession : SafeHandleZeroOrMinusOneIsInvalid
 
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    private static partial IntPtr notes_offline_open(string path, out IntPtr session);
+    private static partial IntPtr notes_offline_open(string path, string? dbKeyHex, out IntPtr session);
 
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
@@ -85,6 +92,19 @@ internal sealed class HistoryConflictException() :
 internal sealed class SyncUnauthorizedException(string message) : InvalidOperationException(message);
 
 internal sealed class SyncNetworkException(string message) : InvalidOperationException(message);
+
+internal sealed class NoteLockedException() :
+    InvalidOperationException("Ghi chú đang khóa. Hãy mở khóa để xem nội dung.");
+
+internal sealed class WrongPassphraseException(string message) : InvalidOperationException(message);
+
+internal sealed class LockUnsupportedException(string message) : InvalidOperationException(message);
+
+internal sealed class SyncStillEnabledException(string message) : InvalidOperationException(message);
+
+internal sealed record LockStatusDto(bool Supported, string[] LockedNoteIds, bool OpenNoteLocked);
+
+internal sealed record ImageDataDto(string Data, string MimeType);
 
 internal sealed record SyncStatusDto(
     bool Enabled,
@@ -125,14 +145,16 @@ internal sealed record DeviceInfoDto(
     long CreatedAt,
     bool IsCurrent);
 
-internal sealed record FolderItem(string Id, string Name, string Kind)
+internal sealed record FolderItem(string Id, string? ParentId, string Name, string Kind, JsonElement? SmartQuery)
 {
+    public bool IsSmartFolder => SmartQuery is not null && SmartQuery.Value.ValueKind == JsonValueKind.Object;
     public override string ToString() => Name;
 }
 
-public sealed record NoteItem(string Id, string FolderId, string Title, string Snippet, bool Deleted)
+public sealed record NoteItem(string Id, string FolderId, string Title, string Snippet, bool Deleted, bool Locked = false)
 {
     public string DisplayTitle => Title.Length == 0 ? "Ghi chú chưa có tiêu đề" : Title;
+    public Microsoft.UI.Xaml.Visibility LockGlyph => Locked ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
     public override string ToString() => DisplayTitle;
 }
 

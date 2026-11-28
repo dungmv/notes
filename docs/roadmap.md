@@ -49,6 +49,8 @@ Thứ tự phát hành là macOS offline, Windows offline, beta đồng bộ r�
 
 ## M4 · Desktop 1.0
 
+[Kế hoạch triển khai và danh sách task M4 — phần Windows](./plans/20261128183931-m4-desktop-1.0-windows.md)
+
 - Hoàn thiện Locked Notes cục bộ với Keychain/Touch ID và Windows Hello theo khả năng thiết bị. Kiểm tra ghi chú được tạo trước khi khóa, dữ liệu dẫn xuất trong FTS, thumbnail, tag và trạng thái sau khi khóa lại hoặc khởi động lại. Đồng bộ Locked Notes là một mốc riêng sau khi kiểm chứng đổi khóa, lịch sử dữ liệu và thiết bị offline (`TD-003`).
 - Hoàn thiện bảng, tag, Smart Folders, Gallery, Quick Note và import/export. Dùng bộ dữ liệu mẫu để xác định và kiểm thử trường được giữ khi import/export, gồm nội dung, định dạng và ảnh theo phạm vi từng định dạng.
 - Tạo bản cài macOS và Windows. Với macOS, kiểm chứng XCFramework trên Apple Silicon và Intel (`TD-006`). Thử cài mới và nâng cấp từ bản trước, kiểm tra phím tắt, focus bàn phím và trình đọc màn hình ở các luồng chính.

@@ -156,6 +156,32 @@ pub enum Operation {
     RemoveEmbed {
         id: String,
     },
+    TableInsertRow {
+        id: String,
+        after_row: Option<usize>,
+    },
+    TableRemoveRow {
+        id: String,
+        row: usize,
+    },
+    TableInsertColumn {
+        id: String,
+        after_column: Option<usize>,
+    },
+    TableRemoveColumn {
+        id: String,
+        column: usize,
+    },
+    TableMoveRow {
+        id: String,
+        from: usize,
+        to: usize,
+    },
+    TableMoveColumn {
+        id: String,
+        from: usize,
+        to: usize,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -638,7 +664,13 @@ fn apply_op(blocks: &mut Vec<Block>, doc: &Doc, operation: Operation) -> Result<
         | Operation::Format { id, .. }
         | Operation::ParagraphStyle { id, .. }
         | Operation::InsertAt { id, .. }
-        | Operation::RemoveEmbed { id } => id,
+        | Operation::RemoveEmbed { id }
+        | Operation::TableInsertRow { id, .. }
+        | Operation::TableRemoveRow { id, .. }
+        | Operation::TableInsertColumn { id, .. }
+        | Operation::TableRemoveColumn { id, .. }
+        | Operation::TableMoveRow { id, .. }
+        | Operation::TableMoveColumn { id, .. } => id,
     };
     let index = blocks
         .iter()
@@ -845,7 +877,7 @@ fn apply_op(blocks: &mut Vec<Block>, doc: &Doc, operation: Operation) -> Result<
                 || !block.is_valid()
                 || !matches!(
                     block.kind,
-                    BlockKind::Image { .. } | BlockKind::NoteLink { .. }
+                    BlockKind::Image { .. } | BlockKind::NoteLink { .. } | BlockKind::Table { .. }
                 )
             {
                 return Err(EditorError::InvalidOperation);
@@ -858,6 +890,8 @@ fn apply_op(blocks: &mut Vec<Block>, doc: &Doc, operation: Operation) -> Result<
                 kind: BlockKind::Paragraph { content: tail },
             };
             tail.write_text(doc);
+            // Bảng mới phải ghi nội dung các ô vào khóa vị trí trong CRDT.
+            block.write_text(doc);
             blocks.splice(index + 1..index + 1, [block, tail]);
         }
         Operation::RemoveEmbed { .. } => {
@@ -868,6 +902,87 @@ fn apply_op(blocks: &mut Vec<Block>, doc: &Doc, operation: Operation) -> Result<
                 return Err(EditorError::InvalidOperation);
             }
             blocks.remove(index);
+        }
+        Operation::TableInsertRow { after_row, .. } => {
+            let BlockKind::Table { rows } = &mut blocks[index].kind else {
+                return Err(EditorError::InvalidOperation);
+            };
+            let columns = rows.first().map(Vec::len).ok_or(EditorError::InvalidTarget)?;
+            let position = match after_row {
+                Some(row) if row < rows.len() => row + 1,
+                None => rows.len(),
+                _ => return Err(EditorError::InvalidTarget),
+            };
+            rows.insert(
+                position,
+                (0..columns).map(|_| RichText::default()).collect(),
+            );
+            // Khóa ô trong CRDT mang số vị trí (row:column) nên sau khi đổi
+            // cấu trúc phải ghi lại toàn bộ các ô để khớp khóa mới.
+            blocks[index].write_text(doc);
+        }
+        Operation::TableRemoveRow { row, .. } => {
+            let BlockKind::Table { rows } = &mut blocks[index].kind else {
+                return Err(EditorError::InvalidOperation);
+            };
+            if rows.len() <= 1 || row >= rows.len() {
+                return Err(EditorError::InvalidTarget);
+            }
+            rows.remove(row);
+            blocks[index].write_text(doc);
+        }
+        Operation::TableInsertColumn { after_column, .. } => {
+            let BlockKind::Table { rows } = &mut blocks[index].kind else {
+                return Err(EditorError::InvalidOperation);
+            };
+            let columns = rows.first().map(Vec::len).ok_or(EditorError::InvalidTarget)?;
+            let position = match after_column {
+                Some(column) if column < columns => column + 1,
+                None => columns,
+                _ => return Err(EditorError::InvalidTarget),
+            };
+            for row in rows.iter_mut() {
+                row.insert(position, RichText::default());
+            }
+            blocks[index].write_text(doc);
+        }
+        Operation::TableRemoveColumn { column, .. } => {
+            let BlockKind::Table { rows } = &mut blocks[index].kind else {
+                return Err(EditorError::InvalidOperation);
+            };
+            let columns = rows.first().map(Vec::len).ok_or(EditorError::InvalidTarget)?;
+            if columns <= 1 || column >= columns {
+                return Err(EditorError::InvalidTarget);
+            }
+            for row in rows.iter_mut() {
+                row.remove(column);
+            }
+            blocks[index].write_text(doc);
+        }
+        Operation::TableMoveRow { from, to, .. } => {
+            let BlockKind::Table { rows } = &mut blocks[index].kind else {
+                return Err(EditorError::InvalidOperation);
+            };
+            if from >= rows.len() || to >= rows.len() || from == to {
+                return Err(EditorError::InvalidTarget);
+            }
+            let row = rows.remove(from);
+            rows.insert(to, row);
+            blocks[index].write_text(doc);
+        }
+        Operation::TableMoveColumn { from, to, .. } => {
+            let BlockKind::Table { rows } = &mut blocks[index].kind else {
+                return Err(EditorError::InvalidOperation);
+            };
+            let columns = rows.first().map(Vec::len).ok_or(EditorError::InvalidTarget)?;
+            if from >= columns || to >= columns || from == to {
+                return Err(EditorError::InvalidTarget);
+            }
+            for row in rows.iter_mut() {
+                let cell = row.remove(from);
+                row.insert(to, cell);
+            }
+            blocks[index].write_text(doc);
         }
     }
     Ok(())

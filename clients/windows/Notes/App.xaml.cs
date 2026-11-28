@@ -21,8 +21,11 @@ namespace Notes;
 /// </summary>
 public partial class App : Application
 {
+    internal static Window? MainWindow;
+
     private Window? _window;
-    
+    private QuickNoteWindow? _quickNote;
+
     /// <summary>
     /// Initializes the singleton application object.  This is the first line of authored code
     /// executed, and as such is the logical equivalent of main() or WinMain().
@@ -39,6 +42,16 @@ public partial class App : Application
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
         _window = new MainWindow();
+        MainWindow = _window;
         _window.Activate();
+        // Win+Alt+N mở Quick Note; chỉ khả dụng sau khi kho dữ liệu đã mở.
+        HotKeyMonitor.Start(() => _window?.DispatcherQueue.TryEnqueue(() =>
+        {
+            var root = MainPage.DataRootStatic;
+            if (root is null || _quickNote is not null) return;
+            _quickNote = new QuickNoteWindow(root);
+            _quickNote.Closed += (_, _) => _quickNote = null;
+            _quickNote.Activate();
+        }));
     }
 }

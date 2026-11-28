@@ -10,10 +10,11 @@ notes-sync = { path = "../notes-sync" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 yrs = "0.28.2"
-rusqlite = { version = "0.43", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled-sqlcipher-vendored-openssl"] }
 sha2 = "0.10.9"
 tempfile = "3.27"
 thiserror = "2"
+printpdf = "0.13"
 uuid = { version = "1.24", features = ["v5", "v7", "serde"] }
 
 [target.'cfg(windows)'.dependencies]

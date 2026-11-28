@@ -43,6 +43,8 @@ public sealed partial class MainPage : Page
         Loaded += (_, _) => InitializeEditor();
         Unloaded += (_, _) => CloseSession();
         PreviewKeyDown += PageKeys;
+        PointerMoved += (_, _) => ResetAutoLock();
+        PointerPressed += (_, _) => ResetAutoLock();
         Status.Text = "Đang mở ghi chú…";
     }
 
@@ -433,6 +435,7 @@ public sealed partial class MainPage : Page
     private void PageKeys(object sender, KeyRoutedEventArgs args)
     {
         var key = args.Key;
+        ResetAutoLock();
 #if DEBUG
         var allowPatchKeys = prototypeMode || Environment.GetCommandLineArgs().Contains("--verify-ime-patches");
 #else

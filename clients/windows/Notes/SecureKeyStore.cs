@@ -52,4 +52,29 @@ internal static class SecureKeyStore
         var path = Path.Combine(root, FileName);
         if (File.Exists(path)) File.Delete(path);
     }
+
+    /// Ghi file DPAPI cho bất kỳ secret cục bộ nào (khóa DB, passphrase khóa ghi chú…).
+    internal static async Task ProtectFileAsync(string path, byte[] plain)
+    {
+        var provider = new DataProtectionProvider("LOCAL=user");
+        var protectedBuffer = await provider.ProtectAsync(plain.AsBuffer());
+        Array.Clear(plain, 0, plain.Length);
+        await File.WriteAllBytesAsync(path, protectedBuffer.ToArray());
+    }
+
+    /// Đọc file DPAPI; trả về null khi file lỗi hoặc bị hỏng thay vì chết app.
+    internal static async Task<byte[]?> UnprotectFileAsync(string path)
+    {
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var cipher = await File.ReadAllBytesAsync(path);
+            var provider = new DataProtectionProvider();
+            var plainBuffer = await provider.UnprotectAsync(cipher.AsBuffer());
+            var plain = plainBuffer.ToArray();
+            try { return plain; }
+            finally { Array.Clear(plain, 0, plain.Length); }
+        }
+        catch { return null; }
+    }
 }

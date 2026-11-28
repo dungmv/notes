@@ -35,7 +35,7 @@ fn notes_search_and_lifecycle_survive_reopen() {
     {
         let mut store = Store::open(root.path()).unwrap();
         assert_eq!(store.folders().unwrap().len(), 3);
-        folder = store.create_folder("Công việc").unwrap();
+        folder = store.create_folder("Công việc", None).unwrap();
         store.rename_folder(&folder, "Kế hoạch").unwrap();
         id = store.create_note(&folder).unwrap();
         let mut note = store.open_note(&id).unwrap();
@@ -355,4 +355,88 @@ fn profile_long_note() {
         samples[19],
         samples[37]
     );
+}
+
+#[test]
+fn tags_and_smart_folders_follow_content_and_lock() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = Store::open(temp.path()).unwrap();
+
+    let plain = store.create_note(INBOX).unwrap();
+    let mut editor = store.open_note(&plain).unwrap();
+    let block = editor.snapshot().blocks[0].id.clone();
+    store.apply(&mut editor, batch(0, vec![replace(
+        &block, 0, 0, "Họp nhóm #cong-viec và #hoc-tap")])).unwrap();
+
+    let checklist = store.create_note(INBOX).unwrap();
+    let mut editor = store.open_note(&checklist).unwrap();
+    let block = editor.snapshot().blocks[0].id.clone();
+    store.apply(&mut editor, batch(0, vec![
+        replace(&block, 0, 0, "[] "),
+        Operation::ParagraphStyle { id: block.clone(), style: None, checklist: true },
+        replace(&block, 0, 0, "Chạy ca #cong-viec")])).unwrap();
+
+    let tags = store.tags().unwrap();
+    assert_eq!(tags.len(), 2);
+    assert_eq!(tags[0].tag, "cong-viec");
+    assert_eq!(tags[0].notes, 2);
+
+    let note_ids = |notes: &Vec<notes_app::offline::Note>| -> Vec<String> {
+        notes.iter().map(|note| {
+            serde_json::to_value(note).unwrap()["id"].as_str().unwrap().to_owned()
+        }).collect()
+    };
+
+    let found = note_ids(&store.find("#cong-viec").unwrap());
+    assert_eq!(found.len(), 2);
+    assert!(found.contains(&plain) && found.contains(&checklist));
+    let hoc = note_ids(&store.find("#hoc-tap").unwrap());
+    assert_eq!(hoc, vec![plain.clone()]);
+
+    // Smart Folder: tag + checklist → chỉ ghi chú checklist.
+    let smart = store
+        .create_smart_folder(
+            "Việc đang chạy",
+            r#"{"tag":"cong-viec","has_checklist":true}"#,
+        )
+        .unwrap();
+    let notes = note_ids(&store.smart_folder_notes(&smart).unwrap());
+    assert_eq!(notes, vec![checklist.clone()]);
+    let folder = store.folders().unwrap().into_iter().find(|f| f.id == smart).unwrap();
+    assert!(folder.smart_query.is_some());
+
+    // Gõ sai DSL bị từ chối.
+    assert!(matches!(
+        store.create_smart_folder("Lỗi", r#"{"tag":123}"#),
+        Err(OfflineError::InvalidQuery)
+    ));
+
+    // Thư mục con: tạo trong thư mục thường, chặn cha là Smart Folder.
+    let parent = store.create_folder("Cha", None).unwrap();
+    let child = store.create_folder("Con", Some(&parent)).unwrap();
+    assert!(store.folders().unwrap().iter().any(|f| f.id == child));
+    assert!(store.create_folder("Sai", Some(&smart)).is_err());
+}
+
+#[test]
+fn locking_scrubs_tags_and_remove_protection_restores() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = notes_app::offline::Store::open_with_key(
+        temp.path(), Some(&[7u8; 32])).unwrap();
+    let id = store.create_note(INBOX).unwrap();
+    let mut editor = store.open_note(&id).unwrap();
+    let block = editor.snapshot().blocks[0].id.clone();
+    store.apply(&mut editor, batch(0, vec![replace(
+        &block, 0, 0, "Ghi chú riêng tư
+#cong-viec")])).unwrap();
+    assert_eq!(store.tags().unwrap()[0].tag, "cong-viec");
+
+    store.lock_note(&id, "mat-khau", None).unwrap();
+    assert!(store.tags().unwrap().is_empty());
+    assert!(store.find("#cong-viec").unwrap().is_empty());
+
+    store.remove_protection(&id, "mat-khau").unwrap();
+    assert_eq!(store.tags().unwrap()[0].tag, "cong-viec");
+    let restored = serde_json::to_value(&store.find("#cong-viec").unwrap()[0]).unwrap();
+    assert_eq!(restored["id"].as_str().unwrap(), id);
 }

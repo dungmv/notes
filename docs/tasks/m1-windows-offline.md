@@ -39,3 +39,5 @@
 | Clipboard hệ thống | Đặt bitmap mẫu vào clipboard của guest, đặt caret giữa `Before` và `After`, rồi nhấn Ctrl+V. Ảnh hiện đúng vị trí sau khi thoát và mở lại. Lặp lại với Telex đang bật và caret giữa `123` và `456`. SQLite ghi một tham chiếu ảnh, hash trên đĩa khớp metadata và `PRAGMA integrity_check` trả `ok`. Xem `target/m1-disconnected/clipboard-native.log` và `clipboard-reopen-telex.png`. |
 
 [Fixture, lệnh chạy và ma trận ca native](../../fixtures/m1/README.md) · [Sổ nợ kỹ thuật](../technical-debt.md)
+
+[Bàn giao sang M2 Windows](../m2-windows-acceptance.md) đối chiếu các ca M1 với kết quả ở ứng viên M2.

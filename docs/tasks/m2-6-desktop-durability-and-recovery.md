@@ -13,4 +13,6 @@ Kiểm tra luồng ghi thật qua FFI trên cả hai OS với mạng tắt. Xác
 - [ ] Chuyển ghi chú hoặc đóng app bình thường yêu cầu flush. Nếu flush lỗi, UI báo trạng thái lưu theo hợp đồng M1 và giữ phần chờ lưu để thử lại trong phiên.
 - [ ] Migration chạy trên bản sao SQLite cũ cùng blob tương ứng. Sau khi mở và ghi lại, ghi chú, liên kết, FTS và ảnh còn nhất quán. Lưu kết quả từng ca trên cả hai OS và cập nhật TD-010.
 
+Phần Windows đã chạy hai ca dừng WinUI sau ACK, trigger lỗi SQLite cho văn bản và ảnh, thử lại, guard khi rời editor và migration schema 1 có blob. Giữ các mục nghiệm thu hai OS mở cho đến khi có lượt macOS. [Biên bản M2 Windows](../m2-windows-acceptance.md)
+
 [Kế hoạch M2](../plans/20261128095337-m2-desktop-offline.md) · [Hợp đồng lưu và phục hồi](../specs/02-data-model-and-storage.md#31-lưu-bền-vững-và-khôi-phục) · [Sổ nợ kỹ thuật](../technical-debt.md)

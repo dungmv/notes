@@ -1,10 +1,13 @@
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 
 namespace Notes;
 
-internal sealed class OfflineSession : SafeHandleZeroOrMinusOneIsInvalid
+// The native session needs exclusive access. Open can run on a worker before
+// ownership passes to the UI dispatcher. Calls after that stay on the UI thread.
+internal sealed partial class OfflineSession : SafeHandleZeroOrMinusOneIsInvalid
 {
     private const string Library = "notes_ffi.dll";
     private static readonly JsonSerializerOptions Json = new()
@@ -37,6 +40,8 @@ internal sealed class OfflineSession : SafeHandleZeroOrMinusOneIsInvalid
         {
             using var reply = JsonDocument.Parse(Marshal.PtrToStringUTF8(buffer)
                 ?? throw new InvalidOperationException("Core không trả dữ liệu."));
+            if (reply.RootElement.TryGetProperty("code", out var code) && code.GetString() == "history_conflict")
+                throw new HistoryConflictException();
             if (reply.RootElement.TryGetProperty("error", out var error))
                 throw new InvalidOperationException(error.GetString());
             return reply.RootElement.GetProperty("value").Clone();
@@ -50,20 +55,25 @@ internal sealed class OfflineSession : SafeHandleZeroOrMinusOneIsInvalid
         return true;
     }
 
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr notes_offline_open(
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string path, out IntPtr session);
+    [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    private static partial IntPtr notes_offline_open(string path, out IntPtr session);
 
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr notes_offline_call(OfflineSession session,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string request);
+    [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    private static partial IntPtr notes_offline_call(OfflineSession session, string request);
 
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern void notes_offline_free(IntPtr session);
+    [LibraryImport(Library)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    private static partial void notes_offline_free(IntPtr session);
 
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern void notes_m0_string_free(IntPtr buffer);
+    [LibraryImport(Library)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    private static partial void notes_m0_string_free(IntPtr buffer);
 }
+
+internal sealed class HistoryConflictException() :
+    InvalidOperationException("Không thể hoàn tác hoặc làm lại vì khối đã có thay đổi mới.");
 
 internal sealed record FolderItem(string Id, string Name, string Kind)
 {

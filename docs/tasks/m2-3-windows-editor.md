@@ -10,7 +10,9 @@
 
 - [ ] Các kiểu đoạn và định dạng inline cơ bản của M1 chỉnh sửa được bằng toolbar hoặc phím tắt Windows tương ứng. Nội dung và định dạng mở lại đúng qua đường lưu thật.
 - [ ] IME tiếng Việt commit và hủy đúng khi có patch, kể cả patch cùng control. Vị trí caret và vùng chọn đúng khi sửa cạnh emoji, undo/redo và chuyển ghi chú. Kết quả UniKey và phạm vi bộ gõ đã kiểm chứng được ghi vào biên bản.
-- [ ] Checklist đạt các ca Return, Shift+Return, Tab/Shift+Tab, tick/bỏ tick và tự sắp xếp khi bật. Trạng thái, cấp và thứ tự giữ đúng sau khi mở lại.
-- [ ] Mở và sửa một ô bảng fixture M0, giữ nội dung và định dạng các ô còn lại. Ghi kết quả thử patch chạm cùng block, undo/redo và tài liệu dài vào các mục nợ kỹ thuật liên quan.
+- [x] Checklist đạt các ca Return, Shift+Return, Tab/Shift+Tab, tick/bỏ tick và tự sắp xếp khi bật. Trạng thái, cấp và thứ tự giữ đúng sau khi mở lại.
+- [x] Mở và sửa một ô bảng fixture M0, giữ nội dung và định dạng các ô còn lại. Ghi kết quả thử patch chạm cùng block, undo/redo và tài liệu dài vào các mục nợ kỹ thuật liên quan.
+
+Lượt WinUI M2 xác nhận định dạng ô bảng và lịch sử, vùng chọn emoji qua hai lần đổi ghi chú, và khả năng tiếp tục soạn thảo sau xung đột undo. Vietnamese Telex tích hợp đạt commit và hủy với patch cùng control trong Sandbox offline. Còn lượt UniKey và đối chiếu toàn bộ các kiểu đoạn. [Biên bản M2 Windows](../m2-windows-acceptance.md)
 
 [Kế hoạch M2](../plans/20261128095337-m2-desktop-offline.md) · [Ca editor](../specs/03-features-and-editor.md#0-hành-vi-tham-chiếu-và-nghiệm-thu) · [Sổ nợ kỹ thuật](../technical-debt.md)

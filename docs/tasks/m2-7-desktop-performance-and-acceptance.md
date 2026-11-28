@@ -13,4 +13,6 @@
 - [ ] Biên bản ghi kết quả và bằng chứng từng ca trên cả hai OS, gồm FFI, tương thích hai chiều, offline và mở lại sau dừng cưỡng bức. Các ca bắt buộc đều đạt trước khi đóng M2.
 - [ ] Cập nhật trạng thái nợ kỹ thuật liên quan theo bằng chứng. Mục đã xử lý có ngày hoàn thành, mục còn mở có giới hạn và hướng xử lý.
 
+Đã ghi số đo WinUI cho tám lượt khởi động tiến trình và 40 lần sửa tài liệu 130.000 byte. Còn số đo từ input thực, IME, frame hiển thị và lượt macOS. [Biên bản M2 Windows](../m2-windows-acceptance.md)
+
 [Kế hoạch M2](../plans/20261128095337-m2-desktop-offline.md) · [Số đo M0](../m0-editor-prototype-results.md) · [Sổ nợ kỹ thuật](../technical-debt.md)

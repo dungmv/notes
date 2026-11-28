@@ -1,5 +1,5 @@
 use base64::Engine as _;
-use notes_app::editor::Batch;
+use notes_app::editor::{Batch, EditorError};
 use notes_app::offline::{NoteEditor, OfflineError, Store, find_in_text};
 use serde::Deserialize;
 use serde_json::{Value, json, to_value};
@@ -149,7 +149,17 @@ fn active(note: &mut Option<NoteEditor>) -> Result<&mut NoteEditor, OfflineError
 fn reply(result: Reply) -> *mut c_char {
     let value = match result {
         Ok(value) => json!({ "value": value }),
-        Err(error) => json!({ "error": error.to_string() }),
+        Err(error) => {
+            let message = error.to_string();
+            if matches!(
+                error.downcast_ref::<OfflineError>(),
+                Some(OfflineError::Editor(EditorError::HistoryConflict))
+            ) {
+                json!({ "error": message, "code": "history_conflict" })
+            } else {
+                json!({ "error": message })
+            }
+        }
     };
     CString::new(value.to_string())
         .expect("JSON escapes null bytes")

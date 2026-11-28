@@ -1,4 +1,4 @@
-param([switch]$Run, [string]$DataDirectory, [switch]$ReplayM0, [switch]$VerifyM1)
+param([switch]$Run, [string]$DataDirectory, [switch]$ReplayM0, [switch]$VerifyM1, [string]$StandaloneOutput)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -12,6 +12,10 @@ if (!$triple) { throw "Unsupported Windows architecture $architecture" }
 $platform = if ($architecture -eq 'arm64') { 'ARM64' } else { $architecture }
 $previousDll = $env:M0CoreDll
 $appArguments = @()
+if ($StandaloneOutput) {
+    if ($Run -or $VerifyM1 -or $ReplayM0) { throw 'StandaloneOutput builds without launching the app' }
+    $StandaloneOutput = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($StandaloneOutput)
+}
 if ($DataDirectory) {
     $absoluteDataDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($DataDirectory)
     $appArguments += '--data-dir', $absoluteDataDirectory
@@ -34,6 +38,9 @@ try {
     Push-Location (Join-Path $root 'clients/windows/Notes')
     try {
         if ($Run) { dotnet run -c Debug -p:Platform=$platform -p:WinAppRunDevTools=off -- @appArguments }
+        elseif ($StandaloneOutput) {
+            dotnet build -c Debug -p:Platform=$platform -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true --self-contained -o $StandaloneOutput
+        }
         else { dotnet build -p:Platform=$platform }
         if ($LASTEXITCODE) { throw 'WinUI build or launch failed' }
         if ($VerifyM1) {

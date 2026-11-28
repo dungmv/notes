@@ -8,9 +8,11 @@ Phiên bản hóa fixture desktop có kết quả kỳ vọng, gồm dữ liệu
 
 ## Tiêu chí nghiệm thu
 
-- [ ] Fixture, lệnh chuẩn bị và ma trận ca có thể chạy lại từ trạng thái dữ liệu sạch. Ma trận bao phủ ca editor M0 và luồng M1, gồm thư mục, xóa/khôi phục, tìm kiếm tiếng Việt, phím tắt và focus.
+- [x] Fixture, lệnh chuẩn bị và ma trận ca có thể chạy lại từ trạng thái dữ liệu sạch. Ma trận bao phủ ca editor M0 và luồng M1, gồm thư mục, xóa/khôi phục, tìm kiếm tiếng Việt, phím tắt và focus.
 - [ ] Kiểm thử Swift và C# gọi vào Rust thật. Cả hai kiểm tra UTF-16 và range lỗi, round-trip tài liệu, commit/ACK, callback bất đồng bộ và vòng đời tài nguyên qua các lượt mở/đóng lặp lại.
 - [ ] Từ bản sao cùng fixture, A sửa và lưu offline, đóng phiên rồi chuyển dữ liệu bằng quy trình fixture nhất quán, gồm cả blob. B mở, kiểm tra, sửa và lưu. A đọc lại kết quả. Chạy quy trình với cả macOS và Windows ở vai trò A.
 - [ ] Đối chiếu nội dung, định dạng, checklist, bảng mẫu, vị trí và hash ảnh, ID đích và kiểu nhãn liên kết sau mỗi lần mở. Lưu log và kết quả cho từng chiều cùng phiên bản fixture.
+
+Đã chạy phần Windows với [fixture desktop v1](../../fixtures/m2/README.md). Lượt Swift và chuyển dữ liệu hai chiều phụ thuộc adapter offline và nghiệm thu M1.8 trên macOS. [Biên bản M2 Windows](../m2-windows-acceptance.md)
 
 [Kế hoạch M2](../plans/20261128095337-m2-desktop-offline.md) · [Chiến lược kiểm thử](../specs/05-platform-clients-and-roadmap.md#4-chiến-lược-kiểm-thử-testing-strategy)

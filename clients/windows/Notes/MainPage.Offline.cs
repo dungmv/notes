@@ -20,8 +20,11 @@ public sealed partial class MainPage
     private NoteItem? currentNote;
     private FolderItem? currentFolder;
     private FolderItem[] folders = [];
+    private readonly Dictionary<string, (string Block, Cell? Cell, int Start, int End)> savedSelections = [];
     private DispatcherQueueTimer? refreshTimer;
     private bool refreshing;
+    private bool opening;
+    private CancellationTokenSource? lifetime;
     private bool dialogOpen;
     private bool loadingImage;
     private (Func<EditorUpdate> Call, bool Redo)? pending;
@@ -30,7 +33,7 @@ public sealed partial class MainPage
     private bool ReadOnlyNote => !prototypeMode && (currentNote?.Deleted != false || pending is not null);
     private bool IsComposing => views.Values.SelectMany(view => view.Fields).Any(item => item.Composing);
 
-    private void InitializeEditor()
+    private async void InitializeEditor()
     {
         if (prototypeMode)
         {
@@ -38,10 +41,25 @@ public sealed partial class MainPage
             NoteColumn.Width = new GridLength(0);
             FolderPane.Visibility = NotePane.Visibility = NoteActions.Visibility = Visibility.Collapsed;
             PrototypeActions.Visibility = Visibility.Visible;
-            Reset();
+            Run(Reset);
             return;
         }
-        if (offline is not null) return;
+        if (offline is not null || opening) return;
+        using var cancellation = new CancellationTokenSource();
+        lifetime = cancellation;
+        opening = true;
+        try { await OpenOffline(cancellation.Token); }
+        catch (Exception error) when (!cancellation.IsCancellationRequested) { Report(error.Message); }
+        catch (Exception) when (cancellation.IsCancellationRequested) { }
+        finally
+        {
+            opening = false;
+            lifetime = null;
+        }
+    }
+
+    private async Task OpenOffline(CancellationToken cancellation)
+    {
         var args = Environment.GetCommandLineArgs();
         var index = Array.IndexOf(args, "--data-dir");
         if (index == args.Length - 1) throw new ArgumentException("--data-dir cần đường dẫn.");
@@ -50,10 +68,19 @@ public sealed partial class MainPage
         root = Path.GetFullPath(root);
 #if DEBUG
         var verify = args.Contains("--verify-m1");
+        var m2 = args.SingleOrDefault(arg => arg.StartsWith("--m2-", StringComparison.Ordinal));
         if (verify && (index < 0 || File.Exists(Path.Combine(root, "notes.sqlite3"))))
             throw new InvalidOperationException("--verify-m1 cần --data-dir trỏ tới thư mục thử nghiệm mới.");
+        if (m2 is not null && (index < 0 || !File.Exists(Path.Combine(root, "notes.sqlite3"))))
+            throw new InvalidOperationException("Nghiệm thu M2 cần --data-dir chứa fixture desktop.");
 #endif
-        offline = OfflineSession.Open(root);
+        var session = await Task.Run(() => OfflineSession.Open(root), cancellation);
+        if (cancellation.IsCancellationRequested)
+        {
+            session.Dispose();
+            return;
+        }
+        offline = session;
         ChecklistSort.IsChecked = offline.Call<bool>(new { type = "checklist_sort" });
         refreshTimer ??= DispatcherQueue.CreateTimer();
         refreshTimer.Interval = TimeSpan.FromMilliseconds(180);
@@ -65,10 +92,26 @@ public sealed partial class MainPage
         GlobalSearch.Focus(FocusState.Programmatic);
 #if DEBUG
         if (verify) DispatcherQueue.TryEnqueue(() => _ = VerifyOffline(root));
+        if (m2 is not null) DispatcherQueue.TryEnqueue(() => _ = VerifyM2(root, m2));
 #endif
     }
 
     private void RefreshTick(DispatcherQueueTimer timer, object args) => Run(RefreshNotes);
+
+    internal void CloseSession()
+    {
+        lifetime?.Cancel();
+        if (refreshTimer is not null)
+        {
+            refreshTimer.Stop();
+            refreshTimer.Tick -= RefreshTick;
+            refreshTimer = null;
+        }
+        editor?.Dispose();
+        editor = null;
+        offline?.Dispose();
+        offline = null;
+    }
 
     private void RefreshFolders(string id)
     {
@@ -114,14 +157,35 @@ public sealed partial class MainPage
         var snapshot = note is null
             ? new EditorSnapshot(0, [])
             : offline!.Call<EditorSnapshot>(new { type = "open_note", id = note.Id });
+        if (currentNote is not null && active is not null)
+        {
+            var (start, end) = Selection(active);
+            savedSelections[currentNote.Id] = (active.Id, active.Cell, start, end);
+        }
         currentNote = note;
         lastMatch = null;
         ShowSnapshot(snapshot);
+        if (note is not null && savedSelections.TryGetValue(note.Id, out var selection) &&
+            views.TryGetValue(selection.Block, out var selectedView))
+        {
+            active = selectedView.Fields.FirstOrDefault(field => field.Cell == selection.Cell);
+            if (active is not null)
+            {
+                var text = active.Content.Text;
+                active.Control.Document.Selection.SetRange(ClampCaret(text, selection.Start), ClampCaret(text, selection.End));
+            }
+        }
         SetEditLock();
         MoveButton.IsEnabled = note?.Deleted == false;
         DeleteButton.IsEnabled = note is not null;
         DeleteButton.Content = note?.Deleted == true ? "Khôi phục" : "Xóa";
         Report();
+    }
+
+    private static int ClampCaret(string text, int offset)
+    {
+        offset = Math.Min(offset, text.Length);
+        return offset < text.Length && char.IsLowSurrogate(text[offset]) ? offset - 1 : offset;
     }
 
     private void FolderChanged(object sender, SelectionChangedEventArgs args)
@@ -313,7 +377,17 @@ public sealed partial class MainPage
         if (pending is not null) throw new InvalidOperationException("Hãy thử lưu lại thay đổi đang chờ.");
         Status.Text = "Đang lưu…";
         EditorUpdate update;
-        try { update = call(); }
+        try
+        {
+#if DEBUG
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+#endif
+            update = call();
+#if DEBUG
+            acceptanceAcks?.Add(System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+#endif
+        }
+        catch (HistoryConflictException) { throw; }
         catch (Exception error)
         {
             pending = (call, redo);
@@ -429,11 +503,19 @@ public sealed partial class MainPage
         else if (args.Key == VirtualKey.N) Run(CreateNote);
         else if (active?.Control.FocusState is null or FocusState.Unfocused) return false;
         else if (args.Key == VirtualKey.K) _ = ShowLinkPicker(active);
+        else if (shift && args.Key == VirtualKey.L && active is { Cell: null } field && !ReadOnlyNote)
+            Run(() => ToggleChecklist(field));
         else if (args.Key is VirtualKey.B or VirtualKey.I or VirtualKey.U)
             Run(() => Format(args.Key switch { VirtualKey.B => "bold", VirtualKey.I => "italic", _ => "underline" }));
         else return false;
         args.Handled = true;
         return true;
+    }
+
+    private void ToggleChecklist(Field field)
+    {
+        if (field.Checklist) Apply(new { type = "toggle", id = field.Id });
+        else Apply(new { type = "paragraph_style", id = field.Id, style = (string?)null, checklist = true });
     }
 
     private void FindKeyDown(object sender, KeyRoutedEventArgs args)

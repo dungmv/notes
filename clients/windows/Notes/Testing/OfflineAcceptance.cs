@@ -133,10 +133,14 @@ public sealed partial class MainPage
         {
             WriteAcceptanceResult(root, passed, error.ToString());
         }
-        finally { Application.Current.Exit(); }
+        finally
+        {
+            CloseSession();
+            Application.Current.Exit();
+        }
     }
 
-    private async Task EnterAcceptanceText(Field field, string text)
+    private async Task EnterAcceptanceText(Field field, string text, bool expectFailure = false)
     {
         for (var attempt = 0; !field.Control.IsLoaded && attempt < 100; attempt++) await Task.Delay(25);
         Require(field.Control.IsLoaded, "RichEditBox loaded");
@@ -145,7 +149,8 @@ public sealed partial class MainPage
         field.Control.Document.SetText(TextSetOptions.None, text);
         // RichEditBox raises TextChanged through the XAML dispatcher.
         for (var attempt = 0; revision == previous && pending is null && attempt < 100; attempt++) await Task.Delay(25);
-        Require(revision > previous, $"RichEditBox committed {text}. State: {Status.Text}. Editor: {ReadText(field)}");
+        Require(expectFailure ? pending is not null && revision == previous : revision > previous,
+            $"Unexpected RichEditBox write result. State: {Status.Text}.");
     }
 
     private IEnumerable<string> LinkLabels() => blockOrder

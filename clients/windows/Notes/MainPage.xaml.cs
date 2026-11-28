@@ -40,16 +40,8 @@ public sealed partial class MainPage : Page
     public MainPage()
     {
         InitializeComponent();
-        Loaded += (_, _) => Run(InitializeEditor);
-        Unloaded += (_, _) =>
-        {
-            refreshTimer?.Stop();
-            refreshTimer = null;
-            editor?.Dispose();
-            editor = null;
-            offline?.Dispose();
-            offline = null;
-        };
+        Loaded += (_, _) => InitializeEditor();
+        Unloaded += (_, _) => CloseSession();
         PreviewKeyDown += PageKeys;
         Status.Text = "Đang mở ghi chú…";
     }
@@ -229,6 +221,9 @@ public sealed partial class MainPage : Page
             return;
         }
         Apply(Replace(field, change.Start, change.End, change.Text));
+#if DEBUG
+        if (started != 0) acceptanceProjections?.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+#endif
         if (!prototypeMode && change.Text.EndsWith('>'))
             SuggestAfterTrigger(field, change.Start + change.Text.Length);
         if (prototypeMode && started != 0) typing.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
@@ -365,8 +360,7 @@ public sealed partial class MainPage : Page
     private void ApplyExternal(Field field, int offset)
     {
         var text = field.Content.Text;
-        offset = Math.Clamp(offset, 0, text.Length);
-        if (offset < text.Length && char.IsLowSurrogate(text[offset])) offset--;
+        offset = ClampCaret(text, Math.Max(offset, 0));
         Apply(Replace(field, offset, offset, "✓ "), external: true);
     }
 
@@ -434,7 +428,12 @@ public sealed partial class MainPage : Page
     private void PageKeys(object sender, KeyRoutedEventArgs args)
     {
         var key = args.Key;
-        if (prototypeMode && key is VirtualKey.F6 or VirtualKey.F7 or VirtualKey.F8)
+#if DEBUG
+        var allowPatchKeys = prototypeMode || Environment.GetCommandLineArgs().Contains("--verify-ime-patches");
+#else
+        var allowPatchKeys = prototypeMode;
+#endif
+        if (allowPatchKeys && !ReadOnlyNote && key is VirtualKey.F6 or VirtualKey.F7 or VirtualKey.F8)
         {
             args.Handled = true;
             Run(() => SendPatch(key));
@@ -454,6 +453,16 @@ public sealed partial class MainPage : Page
         {
             args.Handled = true;
             Run(() => Apply(new { type = "indent", id = field.Id, delta = shift ? -1 : 1 }));
+        }
+        else if (field.Checklist && key == VirtualKey.Enter && shift)
+        {
+            args.Handled = true;
+            Run(() =>
+            {
+                var (start, end) = Selection(field);
+                Apply(Replace(field, start, end, "\n"));
+                field.Control.Document.Selection.SetRange(start + 1, start + 1);
+            });
         }
         else if ((field.Checklist || (!prototypeMode && field.Cell is null)) && key == VirtualKey.Enter && !shift)
         {

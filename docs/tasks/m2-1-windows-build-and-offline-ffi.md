@@ -9,8 +9,10 @@ Mở rộng dự án WinUI và script build Rust DLL hiện có. Dựa trên C A
 ## Tiêu chí nghiệm thu
 
 - [ ] Ghim phiên bản gói WinUI đã kiểm chứng, build và mở app từ môi trường Windows sạch trên các kiến trúc công bố hỗ trợ cho M2. Script đưa đúng DLL vào đầu ra build và tài liệu ghi lệnh chạy lại.
-- [ ] App mở và đóng phiên Rust với thư mục dữ liệu Windows. Tạo, đọc, cập nhật và tìm một ghi chú qua FFI với mạng tắt.
+- [x] App mở và đóng phiên Rust với thư mục dữ liệu Windows. Tạo, đọc, cập nhật và tìm một ghi chú qua FFI với mạng tắt.
 - [ ] Lỗi mở phiên hoặc thao tác lưu đi qua FFI và được trả về ứng dụng. Công việc bất đồng bộ giữ UI phản hồi, callback cập nhật UI trên dispatcher và được hủy đăng ký khi đóng phiên.
-- [ ] Có bằng chứng cho lựa chọn binding và cập nhật TD-007, TD-008 theo kết quả build và kiểm thử vòng đời.
+- [x] Có bằng chứng cho lựa chọn binding và cập nhật TD-007, TD-008 theo kết quả build và kiểm thử vòng đời.
+
+M1 đã chạy x64 trên Windows Sandbox sạch. M2 dùng `LibraryImport` với marshalling UTF-8 do .NET sinh, giữ giao thức JSON của M1 và chuyển bước mở phiên sang worker. Kết quả mở được xử lý trên UI dispatcher. Lượt C# M2 mở/đóng tám lần trên fixture qua DLL thật. [Biên bản M2 Windows](../m2-windows-acceptance.md)
 
 [Kế hoạch M2](../plans/20261128095337-m2-desktop-offline.md) · [Hợp đồng FFI](../specs/01-architecture-and-ffi.md) · [Sổ nợ kỹ thuật](../technical-debt.md)

@@ -28,5 +28,6 @@ public sealed partial class MainWindow : Window
             if (RootFrame.Content is MainPage page && !page.TryCloseEditor())
                 args.Cancel = true;
         };
+        Closed += (_, _) => (RootFrame.Content as MainPage)?.CloseSession();
     }
 }
